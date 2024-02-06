@@ -29,10 +29,11 @@
 (defvar-local lsp-bridge-term-menu nil)
 (defvar lsp-bridge-term-buffer "*lsp-bridge-term*")
 (defvar lsp-bridge-term-frame nil)
-
+(defvar lsp-bridge-term-candidates nil)
 (defvar-local lsp-bridge-term-frame-popup-point nil)
 
 (defvar-local lsp-bridge-term-menu-index 0)
+(defvar-local lsp-bridge-term-menu-max -1)
 
 (defvar lsp-bridge-term-annotation-icons
   '(("Function" . " 󰡱 ")
@@ -183,20 +184,27 @@
 
 (defun lsp-bridge-term--menu-render (candidates index)
   "Render menu."
-  (when (and lsp-bridge-term-frame (< 0 (length candidates)))
-    (with-current-buffer (get-buffer-create lsp-bridge-term-buffer)
-      (erase-buffer)
-      (let ((lines (split-string
-                    (with-temp-buffer
-                      (lsp-bridge-term--menu-items-render candidates index)
-                      (buffer-string))
-                    "\n")))
-        (lsp-bridge-term--frame-pos lsp-bridge-term-frame lines)))
-    (popon-redisplay)
-    (plist-put (cdr lsp-bridge-term-frame) :visible t)))
+  (let ((len (length candidates)))
+    (setq-local lsp-bridge-term-menu-max len)
+    (when (and lsp-bridge-term-frame (< 0 len))
+      (with-current-buffer (get-buffer-create lsp-bridge-term-buffer)
+        (erase-buffer)
+        (let ((lines (split-string
+                      (with-temp-buffer
+                        (lsp-bridge-term--menu-items-render candidates index)
+                        (buffer-string))
+                      "\n")))
+          (lsp-bridge-term--frame-pos lsp-bridge-term-frame lines)))
+      (popon-redisplay)
+      (lsp-bridge-term-mode 1)
+      (plist-put (cdr lsp-bridge-term-frame) :visible t))))
 
 (defun lsp-bridge-term--update (candidates index)
   "Update terminal menu."
+  (if (< 0 (length candidates))
+      (setq lsp-bridge-term-candidates candidates)
+    (setq candidates lsp-bridge-term-candidates))
+  
   (let* ((bounds (acm-get-input-prefix-bound)))
     (setq lsp-bridge-term-frame-popup-point (or (car bounds) (point)))
 
@@ -206,11 +214,82 @@
     (lsp-bridge-term--menu-render candidates index)
   ))
 
+(defun lsp-bridge-term-cancel ()
+  "Cancel lsp completion, code action, doc and any exiting ui."
+  (interactive)
+  (lsp-bridge-term-mode 0)
+  (popon-kill-all)
+  (setq lsp-bridge-term-frame nil)
+  (setq-local lsp-bridge-term-menu-max -1)
+  (setq lsp-bridge-term-candidates nil)
+  )
+
+(defun lsp-bridge-term-select-next()
+  "Select next item in menu."
+  (interactive)
+  (unless (= lsp-bridge-term-menu-index (1- lsp-bridge-term-menu-max))
+    (setq lsp-bridge-term-menu-index (1+ lsp-bridge-term-menu-index))
+    (lsp-bridge-term--update nil lsp-bridge-term-menu-index))
+  )
+
+(defun lsp-bridge-term-select-prev ()
+  "Select previous item in menu."
+  (interactive)
+  (unless (= lsp-bridge-term-menu-index 0)
+    (setq lsp-bridge-term-menu-index (1- lsp-bridge-term-menu-index))
+    (lsp-bridge-term--update nil lsp-bridge-term-menu-index))
+  )
+
+(defun lsp-bridge-term-complete ()
+  "Select candidate in menu."
+  (interactive)
+  (let* ((candidate (nth lsp-bridge-term-menu-index lsp-bridge-term-candidates))
+         (bound-start lsp-bridge-term-frame-popup-point)
+         (backend (plist-get candidate :backend))
+         (candidate-expand (intern-soft (format "acm-backend-%s-candidate-expand" backend))))
+
+    (if (fboundp candidate-expand)
+        (funcall candidate-expand candidate bound-start)
+      (delete-region bound-start (point))
+      (insert (plist-get candidate :label))))
+  (lsp-bridge-term-cancel)
+  )
+
+(defvar lsp-bridge-term-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [remap next-line] #'lsp-bridge-term-select-next)
+    (define-key map [remap previous-line] #'lsp-bridge-term-select-prev)
+    (define-key map [down] #'lsp-bridge-term-select-next)
+    (define-key map [up] #'lsp-bridge-term-select-prev)
+    (define-key map [tab]  #'lsp-bridge-term-complete)
+    (define-key map "\C-m" #'lsp-bridge-term-complete)
+    (define-key map "\t" #'lsp-bridge-term-complete)
+    (define-key map "\n" #'lsp-bridge-term-complete)
+    (define-key map "\C-g" #'lsp-bridge-term-cancel)
+    map)
+  "Keymap used when popup is shown.")
+
+(defun lsp-bridge-term-overriding-key-setup ()
+  "Some key define in language mode map will conflict with lsp-bridge-term-mode map.
+So we use `minor-mode-overriding-map-alist' to override key, make sure all keys in lsp-bridge-term-mode can response."
+  (let ((override-map (make-sparse-keymap)))
+    (define-key override-map [?\C-m] 'lsp-bridge-term-complete)))
+
+(define-minor-mode lsp-bridge-term-mode
+  "LSP Bridge Terminal minor mode."
+  :keymap lsp-bridge-term-mode-map
+  :init-value nil
+  ;; Set override map, avoid some language mode map conflict with lsp-bridge-term-mode map.
+  (lsp-bridge-term-overriding-key-setup))
+
 (defun lsp-bridge-term-completion-recv-items (filename filehost candidates position server-name
                                                        completion-trigger-characters server-names)
   "Receive lsp-bridge completion."
   (lsp-bridge--with-file-buffer
       filename filehost
+      ;; `acm-backend-lsp-candidate-expand` needs `acm-backend-lsp-completion-position` to be set
+      ;; in `lsp-bridge-term-complete` function when select candidate.
+      (setq-local acm-backend-lsp-completion-position position)
       (let ((completion-table (make-hash-table :test 'equal)))
         (dolist (item candidates)
           (plist-put item :annotation (capitalize (plist-get item :icon)))
