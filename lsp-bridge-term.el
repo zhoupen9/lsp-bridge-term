@@ -199,12 +199,23 @@
       (lsp-bridge-term-mode 1)
       (plist-put (cdr lsp-bridge-term-frame) :visible t))))
 
+(defun lsp-bridge-term--cancel-if-present ()
+  "Cancel when present."
+  (when (popon-live-p lsp-bridge-term-frame)
+    (lsp-bridge-term-cancel)))
+
+(defun lsp-bridge-term--trigger-completion ()
+  "Returns true when current point should trigger completion."
+  (cond ((bounds-of-thing-at-point 'symbol) t)
+        ((bounds-of-thing-at-point 'whitespace) nil)
+        (t t)))
+
 (defun lsp-bridge-term--update (candidates index)
   "Update terminal menu."
   (if (< 0 (length candidates))
       (setq lsp-bridge-term-candidates candidates)
     (setq candidates lsp-bridge-term-candidates))
-  
+
   (let* ((bounds (acm-get-input-prefix-bound)))
     (setq lsp-bridge-term-frame-popup-point (or (car bounds) (point)))
 
@@ -212,7 +223,7 @@
     (unless (plist-get lsp-bridge-term-frame :direction)
       (plist-put (cdr lsp-bridge-term-frame) :direction 'top))
     (lsp-bridge-term--menu-render candidates index)
-  ))
+    ))
 
 (defun lsp-bridge-term-cancel ()
   "Cancel lsp completion, code action, doc and any exiting ui."
@@ -285,16 +296,20 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
 (defun lsp-bridge-term-completion-recv-items (filename filehost candidates position server-name
                                                        completion-trigger-characters server-names)
   "Receive lsp-bridge completion."
-  (lsp-bridge--with-file-buffer
-      filename filehost
-      ;; `acm-backend-lsp-candidate-expand` needs `acm-backend-lsp-completion-position` to be set
-      ;; in `lsp-bridge-term-complete` function when select candidate.
-      (setq-local acm-backend-lsp-completion-position position)
-      (let ((completion-table (make-hash-table :test 'equal)))
-        (dolist (item candidates)
-          (plist-put item :annotation (capitalize (plist-get item :icon)))
-          (puthash (plist-get item :key) item completion-table))))
-  (lsp-bridge-term--update candidates 0))
+  (if (or (= 0 (length candidates))
+          (not (lsp-bridge-term--trigger-completion)))
+      (lsp-bridge-term--cancel-if-present)
+    (progn
+      (lsp-bridge--with-file-buffer
+          filename filehost
+          ;; `acm-backend-lsp-candidate-expand` needs `acm-backend-lsp-completion-position` to be set
+          ;; in `lsp-bridge-term-complete` function when select candidate.
+          (setq-local acm-backend-lsp-completion-position position)
+          (let ((completion-table (make-hash-table :test 'equal)))
+            (dolist (item candidates)
+              (plist-put item :annotation (capitalize (plist-get item :icon)))
+              (puthash (plist-get item :key) item completion-table))))
+      (lsp-bridge-term--update candidates 0))))
 
 (defun lsp-bridge-term--code-action-popup-menu (actions action)
   "Popup code action menu."
@@ -302,7 +317,7 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
     (lsp-bridge-term--create-frame-if-not-exist lsp-bridge-term-frame lsp-bridge-term-buffer "lsp-bridge-term")
     (unless (plist-get lsp-bridge-term-frame :direction)
       (plist-put (cdr lsp-bridge-term-frame) :direction 'top))
-    
+
     (dolist (v actions)
       (let* ((title (plist-get v :title))
              (candicate (list :key title :label title :icon "function" :annotation "Function" :displayLabel title)))
