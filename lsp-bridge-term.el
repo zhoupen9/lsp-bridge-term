@@ -57,6 +57,11 @@
 
 (defgroup lsp-bridge-term nil "lsp-bridge terminal group.")
 
+(defcustom lsp-bridge-term-completion-trigger
+  '("." "->" "=>")
+  "Symbols triggers completion."
+  :group 'lsp-bridge-term)
+
 (defface lsp-bridge-term-select-face
   '((t :background "black" :foreground "white"))
   "Default terminal menu select face."
@@ -122,9 +127,10 @@
 (defun lsp-bridge-term--frame-pos (frame lines)
   "Setup terminal frame position."
   (pcase-let* ((`(,edge-left ,edge-top ,edge-right ,edge-bottom) (window-inside-edges))
-               (textarea-width (- (window-width)
-                                  (+ (- edge-left (window-left-column))
-                                     (lsp-bridge-term-line-number-display-width))))
+               (textarea-width
+                (- (window-width)
+                   (+ (- edge-left (window-left-column))
+                      (lsp-bridge-term-line-number-display-width))))
                (textarea-height (- edge-bottom edge-top))
                (`(,cursor-x . ,cursor-y)
                 (prog1 (lsp-bridge-term--get-popup-position frame)
@@ -159,22 +165,24 @@
              candidate)
         (setq candidate
               (concat
-               (propertize (format "%s" (lsp-bridge-term--menu-item-icon-text annotation)
-                                   'face
-                                   (if (equal item-index index)
-                                       'lsp-bridge-term-select-face 'font-lock-doc-face)))
+               (propertize
+                (format "%s" (lsp-bridge-term--menu-item-icon-text annotation)
+                        'face
+                        (if (equal item-index index)
+                            'lsp-bridge-term-select-face 'font-lock-doc-face)))
                (if (eq 0 padding)
                    display
                  (concat display (make-string padding ?\s)))
 
                "\n"))
 
-        (add-face-text-property 0 (length candidate)
-                                (if (equal item-index index)
-                                    'lsp-bridge-term-select-face
-                                  'lsp-bridge-term-default-face)
-                                'append candidate)
-
+        (add-face-text-property
+         0 (length candidate)
+         (if (equal item-index index)
+             'lsp-bridge-term-select-face
+           'lsp-bridge-term-default-face)
+         'append candidate)
+        
         (insert candidate)
 
         (when (equal item-index (1- (length candidates)))
@@ -194,6 +202,7 @@
                         (lsp-bridge-term--menu-items-render candidates index)
                         (buffer-string))
                       "\n")))
+          (goto-char (point-min))
           (lsp-bridge-term--frame-pos lsp-bridge-term-frame lines)))
       (popon-redisplay)
       (lsp-bridge-term-mode 1)
@@ -204,11 +213,23 @@
   (when (popon-live-p lsp-bridge-term-frame)
     (lsp-bridge-term-cancel)))
 
+(defun lsp-bridge-term--symbol-end ()
+  "Returns true when current point is at end of symbol."
+  (save-excursion
+    (let ((orig (point)))
+      (forward-symbol -1)
+      (forward-symbol 1)
+      (let ((end (point)))
+        (if (= end orig)
+            nil
+          (let ((prev (buffer-substring-no-properties end orig)))
+            (member prev lsp-bridge-term-completion-trigger)))))))
+
 (defun lsp-bridge-term--trigger-completion ()
   "Returns true when current point should trigger completion."
   (cond ((bounds-of-thing-at-point 'symbol) t)
-        ((bounds-of-thing-at-point 'whitespace) nil)
-        (t t)))
+        ((bounds-of-thing-at-point 'whitespace) (lsp-bridge-term--symbol-end))
+        (t nil)))
 
 (defun lsp-bridge-term--update (candidates index)
   "Update terminal menu."
@@ -221,7 +242,7 @@
 
     (lsp-bridge-term--create-frame-if-not-exist lsp-bridge-term-frame lsp-bridge-term-buffer "lsp-bridge-term")
     (unless (plist-get lsp-bridge-term-frame :direction)
-      (plist-put (cdr lsp-bridge-term-frame) :direction 'top))
+      (plist-put (cdr lsp-bridge-term-frame) :direction 'bottom))
     (lsp-bridge-term--menu-render candidates index)
     ))
 
@@ -230,6 +251,8 @@
   (interactive)
   (lsp-bridge-term-mode 0)
   (popon-kill-all)
+  (when (bufferp lsp-bridge-term-buffer)
+    (kill-buffer lsp-bridge-term-buffer))
   (setq lsp-bridge-term-frame nil)
   (setq-local lsp-bridge-term-menu-max -1)
   (setq lsp-bridge-term-candidates nil)
@@ -300,6 +323,8 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
           (not (lsp-bridge-term--trigger-completion)))
       (lsp-bridge-term--cancel-if-present)
     (progn
+      (when (popon-live-p lsp-bridge-term-frame)
+        (lsp-bridge-term-cancel))
       (lsp-bridge--with-file-buffer
           filename filehost
           ;; `acm-backend-lsp-candidate-expand` needs `acm-backend-lsp-completion-position` to be set
@@ -316,7 +341,7 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
   (let ((candidates '()))
     (lsp-bridge-term--create-frame-if-not-exist lsp-bridge-term-frame lsp-bridge-term-buffer "lsp-bridge-term")
     (unless (plist-get lsp-bridge-term-frame :direction)
-      (plist-put (cdr lsp-bridge-term-frame) :direction 'top))
+      (plist-put (cdr lsp-bridge-term-frame) :direction 'bottom))
 
     (dolist (v actions)
       (let* ((title (plist-get v :title))
