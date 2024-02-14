@@ -30,7 +30,7 @@
 (defvar lsp-bridge-term-buffer "*lsp-bridge-term*")
 (defvar lsp-bridge-term-frame nil)
 (defvar lsp-bridge-term-candidates nil)
-(defvar-local lsp-bridge-term-frame-popup-point nil)
+(defvar lsp-bridge-term-frame-popup-point nil)
 
 (defvar-local lsp-bridge-term-menu-index 0)
 (defvar-local lsp-bridge-term-menu-max -1)
@@ -197,15 +197,13 @@
     (when (and lsp-bridge-term-frame (< 0 len))
       (with-current-buffer (get-buffer-create lsp-bridge-term-buffer)
         (erase-buffer)
-        (let ((lines (split-string
-                      (with-temp-buffer
-                        (lsp-bridge-term--menu-items-render candidates index)
-                        (buffer-string))
-                      "\n")))
-          (goto-char (point-min))
-          (lsp-bridge-term--frame-pos lsp-bridge-term-frame lines)))
+        (lsp-bridge-term--menu-items-render candidates index)
+        (goto-char (point-min))
+        (lsp-bridge-term--frame-pos lsp-bridge-term-frame
+                                    (split-string (buffer-string) "\n")))
       (popon-redisplay)
       (lsp-bridge-term-mode 1)
+      (add-hook 'pre-command-hook #'lsp-bridge-term--pre-command nil 'local)
       (plist-put (cdr lsp-bridge-term-frame) :visible t))))
 
 (defun lsp-bridge-term--cancel-if-present ()
@@ -241,38 +239,35 @@
     (setq lsp-bridge-term-frame-popup-point (or (car bounds) (point)))
 
     (lsp-bridge-term--create-frame-if-not-exist lsp-bridge-term-frame lsp-bridge-term-buffer "lsp-bridge-term")
-    (unless (plist-get lsp-bridge-term-frame :direction)
+    (unless (plist-get (cdr lsp-bridge-term-frame) :direction)
       (plist-put (cdr lsp-bridge-term-frame) :direction 'bottom))
-    (lsp-bridge-term--menu-render candidates index)
-    ))
+    (lsp-bridge-term--menu-render candidates index)))
 
 (defun lsp-bridge-term-cancel ()
   "Cancel lsp completion, code action, doc and any exiting ui."
   (interactive)
   (lsp-bridge-term-mode 0)
+  (remove-hook 'pre-command-hook #'lsp-bridge-term--pre-command 'local)
   (popon-kill-all)
   (when (bufferp lsp-bridge-term-buffer)
     (kill-buffer lsp-bridge-term-buffer))
   (setq lsp-bridge-term-frame nil)
   (setq-local lsp-bridge-term-menu-max -1)
-  (setq lsp-bridge-term-candidates nil)
-  )
+  (setq lsp-bridge-term-candidates nil))
 
 (defun lsp-bridge-term-select-next()
   "Select next item in menu."
   (interactive)
   (unless (= lsp-bridge-term-menu-index (1- lsp-bridge-term-menu-max))
     (setq lsp-bridge-term-menu-index (1+ lsp-bridge-term-menu-index))
-    (lsp-bridge-term--update nil lsp-bridge-term-menu-index))
-  )
+    (lsp-bridge-term--update nil lsp-bridge-term-menu-index)))
 
 (defun lsp-bridge-term-select-prev ()
   "Select previous item in menu."
   (interactive)
   (unless (= lsp-bridge-term-menu-index 0)
     (setq lsp-bridge-term-menu-index (1- lsp-bridge-term-menu-index))
-    (lsp-bridge-term--update nil lsp-bridge-term-menu-index))
-  )
+    (lsp-bridge-term--update nil lsp-bridge-term-menu-index)))
 
 (defun lsp-bridge-term-complete ()
   "Select candidate in menu."
@@ -286,8 +281,7 @@
         (funcall candidate-expand candidate bound-start)
       (delete-region bound-start (point))
       (insert (plist-get candidate :label))))
-  (lsp-bridge-term-cancel)
-  )
+  (lsp-bridge-term-cancel))
 
 (defvar lsp-bridge-term-mode-map
   (let ((map (make-sparse-keymap)))
@@ -302,6 +296,13 @@
     (define-key map "\C-g" #'lsp-bridge-term-cancel)
     map)
   "Keymap used when popup is shown.")
+
+(defvar lsp-bridge-term-select-commands
+  '(lsp-bridge-term-select-next lsp-bridge-term-select-prev))
+
+(defun lsp-bridge-term--pre-command ()
+  (unless (acm-match-symbol-p lsp-bridge-term-select-commands this-command)
+    (lsp-bridge-term--cancel-if-present)))
 
 (defun lsp-bridge-term-overriding-key-setup ()
   "Some key define in language mode map will conflict with lsp-bridge-term-mode map.
@@ -340,20 +341,18 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
   "Popup code action menu."
   (let ((candidates '()))
     (lsp-bridge-term--create-frame-if-not-exist lsp-bridge-term-frame lsp-bridge-term-buffer "lsp-bridge-term")
-    (unless (plist-get lsp-bridge-term-frame :direction)
+    (unless (plist-get (cdr lsp-bridge-term-frame) :direction)
       (plist-put (cdr lsp-bridge-term-frame) :direction 'bottom))
 
     (dolist (v actions)
       (let* ((title (plist-get v :title))
              (candicate (list :key title :label title :icon "function" :annotation "Function" :displayLabel title)))
         (add-to-list 'candidates candicate)))
-    (lsp-bridge-term--update candidates -1)
-  ))
+    (lsp-bridge-term--update candidates -1)))
 
 (defun lsp-bridge-term-code-action-recv-actions (actions action-kind)
   "Receive lsp-bridge code actions."
-  (lsp-bridge-term--code-action-popup-menu actions action-kind)
-  )
+  (lsp-bridge-term--code-action-popup-menu actions action-kind))
 
 (defun lsp-bridge-term-diagnostic-recv-items (filepath filehost diagnostics diagnostic-count)
   "Receive lsp-bridge diagnostic.")
@@ -362,7 +361,7 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
   "Receive lsp-bridge signature helps."
   (unless (popon-live-p lsp-bridge-term-frame)
     (let ((candidates '()))
-      (unless (plist-get lsp-bridge-term-frame :direction)
+      (unless (plist-get (cdr lsp-bridge-term-frame) :direction)
         (plist-put (cdr lsp-bridge-term-frame) :direction 'bottom))
 
       (dolist (v helps)
