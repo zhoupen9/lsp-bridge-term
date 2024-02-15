@@ -30,10 +30,11 @@
 (defvar lsp-bridge-term-buffer "*lsp-bridge-term*")
 (defvar lsp-bridge-term-frame nil)
 (defvar lsp-bridge-term-candidates nil)
-(defvar lsp-bridge-term-frame-popup-point nil)
+(defvar-local lsp-bridge-term-frame-popup-point nil)
 
 (defvar-local lsp-bridge-term-menu-index 0)
 (defvar-local lsp-bridge-term-menu-max -1)
+(defvar-local lsp-bridge-term-completion-point nil)
 
 (defvar lsp-bridge-term-annotation-icons
   '(("Function" . " 󰡱 ")
@@ -80,7 +81,7 @@
   "Returns icon text for given annotation."
   (cdr (assoc annotation lsp-bridge-term-annotation-icons)))
 
-(defun lsp-bridge-term--get-popup-position (frame)
+(defun lsp-bridge-term--get-popup-position (position frame)
   "Return postion of menu."
   (if (and frame (eobp))
       ;; The existing overlay will cause `popon-x-y-at-pos' and `posn-x-y' to
@@ -92,7 +93,7 @@
               (if (eq 'top direction)
                   (+ (cdr pos) (cdr size))
                 (1- (cdr pos)))))
-    (let ((pos (popon-x-y-at-pos lsp-bridge-term-frame-popup-point)))
+    (let ((pos (popon-x-y-at-pos position)))
       (if (eobp)
           (cons (car pos) (1+ (cdr pos)))
         pos))))
@@ -105,7 +106,7 @@
 
 (cl-defmacro lsp-bridge-term--create-frame-if-not-exist (frame _frame-buffer _frame-name &optional _internal-border)
   `(unless (popon-live-p ,frame)
-     (let ((pos (lsp-bridge-term--get-popup-position nil)))
+     (let ((pos (lsp-bridge-term--get-popup-position (point) nil)))
        (setq ,frame (popon-create (cons "" 0) pos)))))
 
 (defun lsp-bridge-term--lines-max-length (lines)
@@ -124,7 +125,7 @@
       (add-to-list 'lines (plist-get v :displayLabel)))
     (lsp-bridge-term--lines-max-length lines)))
 
-(defun lsp-bridge-term--frame-pos (frame lines)
+(defun lsp-bridge-term--frame-pos (pos frame lines)
   "Setup terminal frame position."
   (pcase-let* ((`(,edge-left ,edge-top ,edge-right ,edge-bottom) (window-inside-edges))
                (textarea-width
@@ -133,7 +134,7 @@
                       (lsp-bridge-term-line-number-display-width))))
                (textarea-height (- edge-bottom edge-top))
                (`(,cursor-x . ,cursor-y)
-                (prog1 (lsp-bridge-term--get-popup-position frame)
+                (prog1 (lsp-bridge-term--get-popup-position pos frame)
                   (when lines
                     (plist-put (cdr frame) :lines lines)
                     (plist-put (cdr frame) :width (length (car lines))))))
@@ -190,7 +191,7 @@
 
         (setq item-index (1+ item-index))))))
 
-(defun lsp-bridge-term--menu-render (candidates index)
+(defun lsp-bridge-term--menu-render (pos candidates index)
   "Render menu."
   (let ((len (length candidates)))
     (setq-local lsp-bridge-term-menu-max len)
@@ -199,11 +200,11 @@
         (erase-buffer)
         (lsp-bridge-term--menu-items-render candidates index)
         (goto-char (point-min))
-        (lsp-bridge-term--frame-pos lsp-bridge-term-frame
+        (lsp-bridge-term--frame-pos pos lsp-bridge-term-frame
                                     (split-string (buffer-string) "\n")))
       (popon-redisplay)
       (lsp-bridge-term-mode 1)
-      (add-hook 'pre-command-hook #'lsp-bridge-term--pre-command nil 'local)
+      ;;(add-hook 'pre-command-hook #'lsp-bridge-term--pre-command nil 'local)
       (plist-put (cdr lsp-bridge-term-frame) :visible t))))
 
 (defun lsp-bridge-term--cancel-if-present ()
@@ -211,8 +212,17 @@
   (when (popon-live-p lsp-bridge-term-frame)
     (lsp-bridge-term-cancel)))
 
+
 (defun lsp-bridge-term--symbol-end ()
   "Returns true when current point is at end of symbol."
+  (save-excursion
+    (let ((orig (point)))
+      (forward-symbol -1)
+      (forward-symbol 1)
+      (= (point) orig))))
+
+(defun lsp-bridge-term--trigger-end ()
+  "Returns true when current point is at end of completion trigger."
   (save-excursion
     (let ((orig (point)))
       (forward-symbol -1)
@@ -225,8 +235,11 @@
 
 (defun lsp-bridge-term--trigger-completion ()
   "Returns true when current point should trigger completion."
-  (cond ((bounds-of-thing-at-point 'symbol) t)
-        ((bounds-of-thing-at-point 'whitespace) (lsp-bridge-term--symbol-end))
+  (cond
+   ;; ((and lsp-bridge-term-completion-point lsp-bridge-term-frame-popup-point)
+   ;;       (not (= lsp-bridge-term-completion-point lsp-bridge-term-frame-popup-point)))
+        ((bounds-of-thing-at-point 'symbol) (lsp-bridge-term--symbol-end))
+        ((bounds-of-thing-at-point 'whitespace) (lsp-bridge-term--trigger-end))
         (t nil)))
 
 (defun lsp-bridge-term--update (candidates index)
@@ -236,18 +249,21 @@
     (setq candidates lsp-bridge-term-candidates))
 
   (let* ((bounds (acm-get-input-prefix-bound)))
-    (setq lsp-bridge-term-frame-popup-point (or (car bounds) (point)))
+    (setq-local lsp-bridge-term-frame-popup-point
+                (if (< 0 index)
+                    (or (car bounds) (point))
+                  (point)))
 
     (lsp-bridge-term--create-frame-if-not-exist lsp-bridge-term-frame lsp-bridge-term-buffer "lsp-bridge-term")
     (unless (plist-get (cdr lsp-bridge-term-frame) :direction)
       (plist-put (cdr lsp-bridge-term-frame) :direction 'bottom))
-    (lsp-bridge-term--menu-render candidates index)))
+    (lsp-bridge-term--menu-render lsp-bridge-term-frame-popup-point candidates index)))
 
 (defun lsp-bridge-term-cancel ()
   "Cancel lsp completion, code action, doc and any exiting ui."
   (interactive)
   (lsp-bridge-term-mode 0)
-  (remove-hook 'pre-command-hook #'lsp-bridge-term--pre-command 'local)
+  ;;(remove-hook 'pre-command-hook #'lsp-bridge-term--pre-command 'local)
   (popon-kill-all)
   (when (bufferp lsp-bridge-term-buffer)
     (kill-buffer lsp-bridge-term-buffer))
@@ -278,9 +294,10 @@
          (candidate-expand (intern-soft (format "acm-backend-%s-candidate-expand" backend))))
 
     (if (fboundp candidate-expand)
-        (funcall candidate-expand candidate bound-start)
-      (delete-region bound-start (point))
-      (insert (plist-get candidate :label))))
+        (funcall candidate-expand candidate bound-start))
+    (delete-region bound-start (point))
+    (insert (plist-get candidate :label))
+    (setq-local lsp-bridge-term-completion-point lsp-bridge-term-frame-popup-point))
   (lsp-bridge-term-cancel))
 
 (defvar lsp-bridge-term-mode-map
@@ -372,10 +389,28 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
 (defun lsp-bridge-term-search-recv-items (backend items)
   "Receive lsp-bridge search backend.")
 
+(defun lsp-bridge-term-recv-doc (doc)
+  "Receive lsp-bridge documentation popup."
+  (lsp-bridge-term--cancel-if-present)
+  (lsp-bridge-term--create-frame-if-not-exist lsp-bridge-term-frame lsp-bridge-term-buffer "lsp-bridge-term")
+  (unless (plist-get (cdr lsp-bridge-term-frame) :direction)
+    (plist-put (cdr lsp-bridge-term-frame) :direction 'bottom))
+  (with-current-buffer (get-buffer-create lsp-bridge-term-buffer)
+    (erase-buffer)
+    (insert doc)
+    (gfm-view-mode)
+    (lsp-bridge-term--frame-pos (point) lsp-bridge-term-frame
+                                (split-string (buffer-string) "\n")))
+  (popon-redisplay)
+  (lsp-bridge-term-mode 1)
+      ;;(add-hook 'pre-command-hook #'lsp-bridge-term--pre-command nil 'local)
+  (plist-put (cdr lsp-bridge-term-frame) :visible t))
+
 (defvar lsp-bridge-term-advices
   '((lsp-bridge-code-action--fix :override lsp-bridge-term-code-action-recv-actions)
     (lsp-bridge-completion--record-items :override lsp-bridge-term-completion-recv-items)
     (lsp-bridge-diagnostic--render :override lsp-bridge-term-diagnostic-recv-items)
+    (lsp-bridge-popup-documentation--callback :override lsp-bridge-term-recv-doc)
     (lsp-bridge-signature-help--update :override lsp-bridge-term-signature-help-recv)
     (lsp-bridge-search-backend--record-items :override lsp-bridge-term-search-recv-items))
     "advices to adapt lsp-bridge.")
