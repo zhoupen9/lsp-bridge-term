@@ -415,6 +415,29 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
 (defun lsp-bridge-term-search-recv-items (backend items)
   "Receive lsp-bridge search backend.")
 
+(defun lsp-bridge-term--doc-frame-string (max)
+  "Returns doc frame string."
+  (make-string (+ 2 max) ?\s))
+  ;; (let (((make-string (+ 2 max) ?\s)))
+  ;;   (propertize str :background "grey20" :foreground "white")))
+
+(defun lsp-bridge-term--doc-string (lines max)
+  "Convert doc lines into formatted."
+  (let ((rs '()))
+    (push (lsp-bridge-term--doc-frame-string max) rs)
+    (dolist (line lines)
+      (let ((str (car line))
+            (visible (cdr line)))
+        (while (stringp str)
+          (if (> max visible)
+              (progn
+                (push (format " %s%s " str (make-string (- max visible) ?\s)) rs)
+                (setq str nil))
+            (push (format " %s " (substring str 0 max)) rs)
+            (setq str (substring str max))
+            (setq visible (- visible max))))))
+    rs))
+
 (defun lsp-bridge-term-recv-doc (doc)
   "Receive lsp-bridge documentation popup."
   (lsp-bridge-term--cancel-if-present)
@@ -425,11 +448,27 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
     (erase-buffer)
     (insert doc)
     (gfm-view-mode)
-    (lsp-bridge-term--frame-render-at-pos (point) lsp-bridge-term-frame
-                                (split-string (buffer-string) "\n")))
+    (font-lock-ensure)
+
+    (save-excursion
+      (goto-char (point-min))
+      (let (lines doc-lines)
+        (while (not (eobp))
+          (let ((visible (markdown--filter-visible (line-beginning-position) (line-end-position)))
+                (line (buffer-substring (line-beginning-position) (line-end-position))))
+            (if (< 0 (length visible))
+                (push (cons line (length visible)) lines)
+              (push (cons "" 0) lines))
+            (forward-line)))
+        (setq doc-lines (lsp-bridge-term--doc-string lines 75))
+        (dolist (line doc-lines)
+          (add-face-text-property 0 (length line) '((t :background "grey20")) 'append line))
+        (lsp-bridge-term--frame-render-at-pos (point) lsp-bridge-term-frame doc-lines))
+      ))
+  ;; redisplay popon
   (popon-redisplay)
   (lsp-bridge-term-mode 1)
-      ;;(add-hook 'pre-command-hook #'lsp-bridge-term--pre-command nil 'local)
+  ;;(add-hook 'pre-command-hook #'lsp-bridge-term--pre-command nil 'local)
   (plist-put (cdr lsp-bridge-term-frame) :visible t))
 
 (defvar lsp-bridge-term-advices
