@@ -36,24 +36,44 @@
 (defvar-local lsp-bridge-term-menu-max -1)
 (defvar-local lsp-bridge-term-completion-point nil)
 
+(defface lsp-bridge-term-callable-face
+  '((t :background "grey20" :foreground "brightmagenta"))
+  "Default callable face."
+  :group 'lsp-bridge-term)
+
+(defface lsp-bridge-term-symbol-face
+  '((t :background "grey20" :foreground "royalblue1"))
+  "Default symbol face."
+  :group 'lsp-bridge-term)
+
+(defface lsp-bridge-term-module-face
+  '((t :background "grey20" :foreground "gold3"))
+  "Default symbol face."
+  :group 'lsp-bridge-term)
+
+(defface lsp-bridge-term-key-face
+  '((t :background "grey20" :foreground "royalblue1"))
+  "Default key face."
+  :group 'lsp-bridge-term)
+
 (defvar lsp-bridge-term-annotation-icons
-  '(("Function" . " 󰡱 ")
-    ("Keyword" . "  ")
-    ("Module" . "  ")
-    ("Method" . "  ")
-    ("Struct" . "  ")
-    ("Snippet" . "  ")
-    ("Yas-Snippet" . "  ")
-    ("Text" . "  ")
-    ("Variable" . " 󰫧 ")
-    ("Class" . "  ")
-    ("Custom" . "  ")
-    ("Feature" . " 󰯺 ")
-    ("Macro" . " 󰰏 ")
-    ("Interface" . "  ")
-    ("Constant" . "  ")
-    ("Field" . "  ")
-    (nil . " T "))
+  '(("Function" . ("󰡱" . 'lsp-bridge-term-callable-face))
+    ("Keyword" . ("" . 'lsp-bridge-term-key-face))
+    ("Module" . ("" . 'lsp-bridge-term-module-face))
+    ("Method" . ("" . 'lsp-bridge-term-callable-face))
+    ("Struct" . ("" . 'lsp-bridge-term-module-face))
+    ("Snippet" . ("" . 'lsp-bridge-term-symbol-face))
+    ("Yas-Snippet" . ("" . 'lsp-bridge-term-symbol-face))
+    ("Text" . ("" . 'lsp-bridge-term-symbol-face))
+    ("Variable" . ("󰫧" . 'lsp-bridge-term-symbol-face))
+    ("Class" . ("" . 'lsp-bridge-term-module-face))
+    ("Custom" . ("" . 'lsp-bridge-term-symbol-face))
+    ("Feature" . ("󰯺" . 'lsp-bridge-term-key-face))
+    ("Macro" . ("󰰏" . 'lsp-bridge-term-callable-face))
+    ("Interface" . ("" . 'lsp-bridge-term-module-face))
+    ("Constant" . ("" . 'lsp-bridge-term-symbol-face))
+    ("Field" . ("" . 'lsp-bridge-term-symbol-face))
+    (nil . ("T" . 'lsp-bridge-term-symbol-face)))
   "Annotation icons.")
 
 (defgroup lsp-bridge-term nil "lsp-bridge terminal group.")
@@ -64,12 +84,12 @@
   :group 'lsp-bridge-term)
 
 (defface lsp-bridge-term-select-face
-  '((t :background "black" :foreground "white"))
+  '((t :background "grey10" :foreground "grey85"))
   "Default terminal menu select face."
   :group 'lsp-bridge-term)
 
 (defface lsp-bridge-term-default-face
-  '((t :background "grey20" :foreground "white"))
+  '((t :background "grey20" :foreground "grey85"))
   "Default terminal face."
   :group 'lsp-bridge-term)
 
@@ -77,9 +97,13 @@
   (not (or noninteractive
            emacs-basic-display)))
 
-(defun lsp-bridge-term--menu-item-icon-text (annotation)
-  "Returns icon text for given annotation."
-  (cdr (assoc annotation lsp-bridge-term-annotation-icons)))
+(defun lsp-bridge-term--menu-item-icon-text (annotation selected)
+  "Returns propertized icon text for given annotation."
+  (let ((text (cdr (assoc annotation lsp-bridge-term-annotation-icons))))
+    (propertize (format " %s " (car text)) 'face
+                (if selected
+                    'lsp-bridge-term-select-face
+                  (cdr text)))))
 
 (defun lsp-bridge-term--get-popup-position (position frame)
   "Return postion of menu."
@@ -125,7 +149,7 @@
       (add-to-list 'lines (plist-get v :displayLabel)))
     (lsp-bridge-term--lines-max-length lines)))
 
-(defun lsp-bridge-term--frame-pos (pos frame lines)
+(defun lsp-bridge-term--frame-render-at-pos (pos frame lines)
   "Setup terminal frame position."
   (pcase-let* ((`(,edge-left ,edge-top ,edge-right ,edge-bottom) (window-inside-edges))
                (textarea-width
@@ -163,27 +187,22 @@
              (icon (plist-get v :icon))
              (annotation (plist-get v :annotation))
              (padding (- max-length (length display)))
-             candidate)
+             icon candidate)
+        (setq icon (lsp-bridge-term--menu-item-icon-text annotation (eq item-index index)))
         (setq candidate
               (concat
-               (propertize
-                (format "%s" (lsp-bridge-term--menu-item-icon-text annotation)
-                        'face
-                        (if (equal item-index index)
-                            'lsp-bridge-term-select-face 'font-lock-doc-face)))
                (if (eq 0 padding)
                    display
                  (concat display (make-string padding ?\s)))
-
                "\n"))
 
-        (add-face-text-property
-         0 (length candidate)
-         (if (equal item-index index)
-             'lsp-bridge-term-select-face
-           'lsp-bridge-term-default-face)
-         'append candidate)
-        
+        (add-face-text-property 0 (length candidate)
+                                (if (equal item-index index)
+                                    'lsp-bridge-term-select-face
+                                  'lsp-bridge-term-default-face)
+                                'append candidate)
+
+        (insert icon)
         (insert candidate)
 
         (when (equal item-index (1- (length candidates)))
@@ -200,7 +219,7 @@
         (erase-buffer)
         (lsp-bridge-term--menu-items-render candidates index)
         (goto-char (point-min))
-        (lsp-bridge-term--frame-pos pos lsp-bridge-term-frame
+        (lsp-bridge-term--frame-render-at-pos pos lsp-bridge-term-frame
                                     (split-string (buffer-string) "\n")))
       (popon-redisplay)
       (lsp-bridge-term-mode 1)
@@ -242,33 +261,40 @@
         ((bounds-of-thing-at-point 'whitespace) (lsp-bridge-term--trigger-end))
         (t nil)))
 
-(defun lsp-bridge-term--update (candidates index)
+(defun lsp-bridge-term--update (candidates index &optional pos)
   "Update terminal menu."
   (if (< 0 (length candidates))
       (setq lsp-bridge-term-candidates candidates)
     (setq candidates lsp-bridge-term-candidates))
 
-  (let* ((bounds (acm-get-input-prefix-bound)))
-    (setq-local lsp-bridge-term-frame-popup-point
-                (if (< 0 index)
-                    (or (car bounds) (point))
-                  (point)))
+  (if pos
+      (setq-local lsp-bridge-term-frame-popup-point pos)
+    (let* ((bounds (acm-get-input-prefix-bound)))
+      (setq-local lsp-bridge-term-frame-popup-point
+                  (if (< 0 index)
+                      (or (car bounds) (point))
+                    (point)))))
 
-    (lsp-bridge-term--create-frame-if-not-exist lsp-bridge-term-frame lsp-bridge-term-buffer "lsp-bridge-term")
-    (unless (plist-get (cdr lsp-bridge-term-frame) :direction)
-      (plist-put (cdr lsp-bridge-term-frame) :direction 'bottom))
-    (lsp-bridge-term--menu-render lsp-bridge-term-frame-popup-point candidates index)))
+  (lsp-bridge-term--create-frame-if-not-exist lsp-bridge-term-frame lsp-bridge-term-buffer "lsp-bridge-term")
+  (unless (plist-get (cdr lsp-bridge-term-frame) :direction)
+    (plist-put (cdr lsp-bridge-term-frame) :direction 'bottom))
+  (lsp-bridge-term--menu-render lsp-bridge-term-frame-popup-point candidates index))
 
 (defun lsp-bridge-term-cancel ()
   "Cancel lsp completion, code action, doc and any exiting ui."
   (interactive)
   (lsp-bridge-term-mode 0)
+  (with-current-buffer (get-buffer-create lsp-bridge-term-buffer)
+    (when (eq major-mode 'gfm-view-mode)
+      (gfm-view-mode)
+      (read-only-mode 0)))
   ;;(remove-hook 'pre-command-hook #'lsp-bridge-term--pre-command 'local)
   (popon-kill-all)
-  (when (bufferp lsp-bridge-term-buffer)
-    (kill-buffer lsp-bridge-term-buffer))
-  (setq lsp-bridge-term-frame nil)
+  ;;(when (bufferp lsp-bridge-term-buffer)
+  ;;  (kill-buffer lsp-bridge-term-buffer))
+  ;;(setq lsp-bridge-term-frame nil)
   (setq-local lsp-bridge-term-menu-max -1)
+  (setq-local lsp-bridge-term-menu-index 0)
   (setq lsp-bridge-term-candidates nil))
 
 (defun lsp-bridge-term-select-next()
@@ -294,9 +320,9 @@
          (candidate-expand (intern-soft (format "acm-backend-%s-candidate-expand" backend))))
 
     (if (fboundp candidate-expand)
-        (funcall candidate-expand candidate bound-start))
-    (delete-region bound-start (point))
-    (insert (plist-get candidate :label))
+        (funcall candidate-expand candidate bound-start)
+      (delete-region bound-start (point))
+      (insert (plist-get candidate :label)))
     (setq-local lsp-bridge-term-completion-point lsp-bridge-term-frame-popup-point))
   (lsp-bridge-term-cancel))
 
@@ -365,7 +391,7 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
       (let* ((title (plist-get v :title))
              (candicate (list :key title :label title :icon "function" :annotation "Function" :displayLabel title)))
         (add-to-list 'candidates candicate)))
-    (lsp-bridge-term--update candidates -1)))
+    (lsp-bridge-term--update candidates -1 (point))))
 
 (defun lsp-bridge-term-code-action-recv-actions (actions action-kind)
   "Receive lsp-bridge code actions."
@@ -399,7 +425,7 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
     (erase-buffer)
     (insert doc)
     (gfm-view-mode)
-    (lsp-bridge-term--frame-pos (point) lsp-bridge-term-frame
+    (lsp-bridge-term--frame-render-at-pos (point) lsp-bridge-term-frame
                                 (split-string (buffer-string) "\n")))
   (popon-redisplay)
   (lsp-bridge-term-mode 1)
