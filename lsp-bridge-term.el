@@ -30,8 +30,9 @@
 (defvar lsp-bridge-term-buffer "*lsp-bridge-term*")
 (defvar lsp-bridge-term-frame nil)
 (defvar lsp-bridge-term-candidates nil)
-(defvar-local lsp-bridge-term-frame-popup-point nil)
+(defvar lsp-bridge-term-doc-line-max 75)
 
+(defvar-local lsp-bridge-term-frame-popup-point nil)
 (defvar-local lsp-bridge-term-menu-index 0)
 (defvar-local lsp-bridge-term-menu-max -1)
 (defvar-local lsp-bridge-term-completion-point nil)
@@ -106,21 +107,39 @@
                   (cdr text)))))
 
 (defun lsp-bridge-term--get-popup-position (position frame)
-  "Return postion of menu."
-  (if (and frame (eobp))
-      ;; The existing overlay will cause `popon-x-y-at-pos' and `posn-x-y' to
-      ;; get the wrong position when point at the and of buffer.
-      (let ((pos (popon-position frame))
-            (direction (plist-get (cdr frame) :direction))
-            (size (popon-size frame)))
-        (cons (car pos)
-              (if (eq 'top direction)
-                  (+ (cdr pos) (cdr size))
-                (1- (cdr pos)))))
+  "Return position of frame."
+  (if frame
+      (if (eobp)
+          (let ((pos (popon-position frame))
+                (direction (plist-get (cdr frame) :direction))
+                (size (popon-size frame)))
+            (cons (car pos)
+                  (if (eq 'top direction)
+                      (+ (cdr pos) (cdr size))
+                    (1- (cdr pos)))))
+        (cons (plist-get (cdr frame) :x)
+              (plist-get (cdr frame) :y)))
     (let ((pos (popon-x-y-at-pos position)))
       (if (eobp)
           (cons (car pos) (1+ (cdr pos)))
         pos))))
+
+;; (defun lsp-bridge-term--get-popup-position (position frame)
+;;   "Return postion of menu."
+;;   (if (and frame (eobp))
+;;       ;; The existing overlay will cause `popon-x-y-at-pos' and `posn-x-y' to
+;;       ;; get the wrong position when point at the and of buffer.
+;;       (let ((pos (popon-position frame))
+;;             (direction (plist-get (cdr frame) :direction))
+;;             (size (popon-size frame)))
+;;         (cons (car pos)
+;;               (if (eq 'top direction)
+;;                   (+ (cdr pos) (cdr size))
+;;                 (1- (cdr pos)))))
+;;     (let ((pos (popon-x-y-at-pos position)))
+;;       (if (eobp)
+;;           (cons (car pos) (1+ (cdr pos)))
+;;         pos))))
 
 (defun lsp-bridge-term-line-number-display-width ()
   "Return width of line number bar."
@@ -415,28 +434,34 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
 (defun lsp-bridge-term-search-recv-items (backend items)
   "Receive lsp-bridge search backend.")
 
-(defun lsp-bridge-term--doc-frame-string (max)
-  "Returns doc frame string."
-  (make-string (+ 2 max) ?\s))
-  ;; (let (((make-string (+ 2 max) ?\s)))
-  ;;   (propertize str :background "grey20" :foreground "white")))
-
-(defun lsp-bridge-term--doc-string (lines max)
-  "Convert doc lines into formatted."
-  (let ((rs '()))
-    (push (lsp-bridge-term--doc-frame-string max) rs)
-    (dolist (line lines)
-      (let ((str (car line))
-            (visible (cdr line)))
-        (while (stringp str)
-          (if (> max visible)
-              (progn
-                (push (format " %s%s " str (make-string (- max visible) ?\s)) rs)
-                (setq str nil))
-            (push (format " %s " (substring str 0 max)) rs)
-            (setq str (substring str max))
-            (setq visible (- visible max))))))
-    rs))
+(defun lsp-bridge-term--render-doc-current-line ()
+  "Render doc line into rendered line or lines."
+  (let ((begin (line-beginning-position))
+        (end (line-end-position))
+        (lines '()))
+    (if (= begin end)
+        (setq lines (append lines (list (make-string lsp-bridge-term-doc-line-max ?\s))))
+      (while (< begin end)
+        (let* ((visible (markdown--filter-visible begin end))
+               (len (length visible))
+               (padding (- lsp-bridge-term-doc-line-max len 2)))
+          (cond ((= 0 len)
+                 (setq lines (append lines (list (make-string lsp-bridge-term-doc-line-max ?\s))))
+                 (setq begin end))
+                ((< (- lsp-bridge-term-doc-line-max 2) len)
+                 (setq end (1- end)))
+                (t
+                 (setq lines
+                       (append lines
+                               (list
+                                (format " %s%s "
+                                        (string-replace "\t" " " (buffer-substring begin end))
+                                        (if (< 0 padding)
+                                            (make-string padding ?\s)
+                                          "")))))
+                 (setq begin end)
+                 (setq end (line-end-position)))))))
+    lines))
 
 (defun lsp-bridge-term-recv-doc (doc)
   "Receive lsp-bridge documentation popup."
@@ -444,27 +469,26 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
   (lsp-bridge-term--create-frame-if-not-exist lsp-bridge-term-frame lsp-bridge-term-buffer "lsp-bridge-term")
   (unless (plist-get (cdr lsp-bridge-term-frame) :direction)
     (plist-put (cdr lsp-bridge-term-frame) :direction 'bottom))
-  (with-current-buffer (get-buffer-create lsp-bridge-term-buffer)
-    (erase-buffer)
-    (insert doc)
-    (gfm-view-mode)
-    (font-lock-ensure)
 
-    (save-excursion
-      (goto-char (point-min))
-      (let (lines doc-lines)
+  (let ((lines '()))
+    (with-current-buffer (get-buffer-create lsp-bridge-term-buffer)
+      (erase-buffer)
+      (insert doc)
+      (gfm-view-mode)
+      (font-lock-ensure)
+
+      (save-excursion
+        (goto-char (point-min))
         (while (not (eobp))
-          (let ((visible (markdown--filter-visible (line-beginning-position) (line-end-position)))
-                (line (buffer-substring (line-beginning-position) (line-end-position))))
-            (if (< 0 (length visible))
-                (push (cons line (length visible)) lines)
-              (push (cons "" 0) lines))
-            (forward-line)))
-        (setq doc-lines (lsp-bridge-term--doc-string lines 75))
-        (dolist (line doc-lines)
-          (add-face-text-property 0 (length line) '((t :background "grey20")) 'append line))
-        (lsp-bridge-term--frame-render-at-pos (point) lsp-bridge-term-frame doc-lines))
-      ))
+          (setq lines (append lines (lsp-bridge-term--render-doc-current-line)))
+          (forward-line))
+        ;; add empty line at the end of doc
+        (setq lines (append lines (list (make-string lsp-bridge-term-doc-line-max ?\s))))
+        ;; change doc background face
+        (dolist (line lines)
+          (add-face-text-property 0 (length line) '((t :background "grey20")) 'append line))))
+    (lsp-bridge-term--frame-render-at-pos (point) lsp-bridge-term-frame lines))
+
   ;; redisplay popon
   (popon-redisplay)
   (lsp-bridge-term-mode 1)
