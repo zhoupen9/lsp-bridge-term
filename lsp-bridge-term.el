@@ -38,6 +38,11 @@
 (defvar-local lsp-bridge-term-menu-max -1)
 (defvar-local lsp-bridge-term-completion-point nil)
 
+(defun lsp-bridge-term-diagnostics-inline-toggle ()
+  "Toogle display inline diagnostics."
+  (interactive)
+  (setq lsp-bridge-term-diagnostics-inline (not lsp-bridge-term-diagnostics-inline)))
+
 (defface lsp-bridge-term-callable-face
   '((t :background "grey20" :foreground "brightmagenta"))
   "Default callable face."
@@ -59,23 +64,23 @@
   :group 'lsp-bridge-term)
 
 (defvar lsp-bridge-term-annotation-icons
-  '(("Function" . ("󰡱" . 'lsp-bridge-term-callable-face))
-    ("Keyword" . ("" . 'lsp-bridge-term-key-face))
-    ("Module" . ("" . 'lsp-bridge-term-module-face))
-    ("Method" . ("" . 'lsp-bridge-term-callable-face))
-    ("Struct" . ("" . 'lsp-bridge-term-module-face))
-    ("Snippet" . ("" . 'lsp-bridge-term-symbol-face))
-    ("Yas-Snippet" . ("" . 'lsp-bridge-term-symbol-face))
-    ("Text" . ("" . 'lsp-bridge-term-symbol-face))
-    ("Variable" . ("󰫧" . 'lsp-bridge-term-symbol-face))
-    ("Class" . ("" . 'lsp-bridge-term-module-face))
-    ("Custom" . ("" . 'lsp-bridge-term-symbol-face))
-    ("Feature" . ("󰯺" . 'lsp-bridge-term-key-face))
-    ("Macro" . ("󰰏" . 'lsp-bridge-term-callable-face))
-    ("Interface" . ("" . 'lsp-bridge-term-module-face))
-    ("Constant" . ("" . 'lsp-bridge-term-symbol-face))
-    ("Field" . ("" . 'lsp-bridge-term-symbol-face))
-    (nil . ("T" . 'lsp-bridge-term-symbol-face)))
+  '(("Function" . ("󰡱" lsp-bridge-term-callable-face))
+    ("Keyword" . ("" lsp-bridge-term-key-face))
+    ("Module" . ("" lsp-bridge-term-module-face))
+    ("Method" . ("" lsp-bridge-term-callable-face))
+    ("Struct" . ("" lsp-bridge-term-module-face))
+    ("Snippet" . ("" lsp-bridge-term-symbol-face))
+    ("Yas-Snippet" . ("" lsp-bridge-term-symbol-face))
+    ("Text" . ("" lsp-bridge-term-symbol-face))
+    ("Variable" . ("󰫧" lsp-bridge-term-symbol-face))
+    ("Class" . ("" lsp-bridge-term-module-face))
+    ("Custom" . ("" lsp-bridge-term-symbol-face))
+    ("Feature" . ("󰯺" lsp-bridge-term-key-face))
+    ("Macro" . ("󰰏" lsp-bridge-term-callable-face))
+    ("Interface" . ("" lsp-bridge-term-module-face))
+    ("Constant" . ("" lsp-bridge-term-symbol-face))
+    ("Field" . ("" lsp-bridge-term-symbol-face))
+    (nil . ("T" lsp-bridge-term-symbol-face)))
   "Annotation icons.")
 
 (defgroup lsp-bridge-term nil "lsp-bridge terminal group.")
@@ -101,8 +106,13 @@
   :group 'lsp-bridge-term)
 
 (defface lsp-bridge-term-diagnostic-message-face
-  '((t :foreground "red" :inherit 'italic))
+  '((t :foreground "dark red" :inherit 'italic))
   "Diagnostic inline message face."
+  :group 'lsp-bridge-term)
+
+(defface lsp-bridge-term-diagnostic-indicator-face
+  '((t :foreground "red"))
+  "Diagnostic indicator face."
   :group 'lsp-bridge-term)
 
 (defun lsp-bridge-term-can-display-p ()
@@ -115,25 +125,27 @@
     (propertize (format " %s " (car text)) 'face
                 (if selected
                     'lsp-bridge-term-select-face
-                  (cdr text)))))
+                  (cadr text)))))
 
 (defun lsp-bridge-term--get-popup-position (position frame)
   "Return position of frame."
-  (if frame
-      (if (eobp)
-          (let ((pos (popon-position frame))
-                (direction (plist-get (cdr frame) :direction))
-                (size (popon-size frame)))
-            (cons (car pos)
-                  (if (eq 'top direction)
-                      (+ (cdr pos) (cdr size))
-                    (1- (cdr pos)))))
-        (cons (plist-get (cdr frame) :x)
-              (plist-get (cdr frame) :y)))
+  (cond
+   ((numberp position)
     (let ((pos (popon-x-y-at-pos position)))
       (if (eobp)
           (cons (car pos) (1+ (cdr pos)))
-        pos))))
+        pos)))
+   ((poponp frame)
+    (if (eobp)
+        (let ((pos (popon-position frame))
+              (direction (plist-get (cdr frame) :direction))
+              (size (popon-size frame)))
+          (cons (car pos)
+                (if (eq 'top direction)
+                    (+ (cdr pos) (cdr size))
+                  (1- (cdr pos)))))
+      (cons (plist-get (cdr frame) :x)
+            (plist-get (cdr frame) :y))))))
 
 ;; (defun lsp-bridge-term--get-popup-position (position frame)
 ;;   "Return postion of menu."
@@ -449,10 +461,16 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
                     (plist-get end :line)
                     (plist-get end :character)))
              (line (lsp-bridge-term--get-line-end-pos endp))
+             (code (plist-get diagnostic :code))
+             (msg (plist-get diagnostic :message))
              (font-lock-fontify-region-function 'ignore)
              (inhibit-modification-hooks t)
              (modified (buffer-modified-p))
-             overlay)
+             indicator overlay)
+        (unless lsp-bridge-term-diagnostics-inline
+          (setq indicator (make-overlay (car line) (car line)))
+          (overlay-put indicator 'before-string
+                       (propertize "" 'face 'lsp-bridge-term-diagnostic-indicator-face)))
         (cond
          ((= startp endp)
           (when (not (= (car line) (cdr line)))
@@ -461,25 +479,23 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
          (t
           (put-text-property startp endp 'face 'lsp-bridge-term-diagnostic-symbol-face)
           (put-text-property startp endp 'font-lock-ignore t)))
-        (when lsp-bridge-term-diagnostics-inline
+        (when (and lsp-bridge-term-diagnostics-inline msg)
           (setq overlay (make-overlay (cdr line) (cdr line)))
           (overlay-put overlay 'after-string
                        (propertize
-                        (format "%s%s: %s"
-                                (make-string 10 ?\s)
-                                (plist-get diagnostic :code)
-                                (plist-get diagnostic :message))
+                        (format "  %s%s" (if code (format "%s: " code) "") msg)
                         'face 'lsp-bridge-term-diagnostic-message-face)))
         (set-buffer-modified-p modified)))))
 
 (defun lsp-bridge-term-diagnostic-recv-items (filepath filehost diagnostics diagnostic-count)
   "Receive lsp-bridge diagnostic."
-  (dolist (buf (buffer-list))
-    (when (string= filepath (buffer-file-name buf))
-      (with-current-buffer buf
-        (remove-overlays (point-min) (point-max))
-        (dolist (diag diagnostics)
-          (lsp-bridge-term--render-diagnostic diag))))))
+  (unless (popon-live-p lsp-bridge-term-frame)
+    (dolist (buf (buffer-list))
+      (when (string= filepath (buffer-file-name buf))
+        (with-current-buffer buf
+          (remove-overlays (point-min) (point-max))
+          (dolist (diag diagnostics)
+            (lsp-bridge-term--render-diagnostic diag)))))))
 
 (defun lsp-bridge-term-signature-help-recv (helps index)
   "Receive lsp-bridge signature helps."
@@ -520,8 +536,8 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
           (cond ((= 0 len)
                  (lsp-bridge-term--append-empty-line lines)
                  (setq begin end))
-                ((< (- lsp-bridge-term-doc-line-max 2) len)
-                 (setq end (1- end)))
+                ((> 0 padding)
+                 (setq end (+ end padding)))
                 (t
                  (lsp-bridge-term--append-lines-str
                   lines
@@ -566,16 +582,22 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
   ;;(add-hook 'pre-command-hook #'lsp-bridge-term--pre-command nil 'local)
   (plist-put (cdr lsp-bridge-term-frame) :visible t))
 
+(defun lsp-bridge-term-post-command ())
+
 (defvar lsp-bridge-term-advices
   '((lsp-bridge-code-action--fix :override lsp-bridge-term-code-action-recv-actions)
     (lsp-bridge-completion--record-items :override lsp-bridge-term-completion-recv-items)
     (lsp-bridge-diagnostic--render :override lsp-bridge-term-diagnostic-recv-items)
     (lsp-bridge-popup-documentation--callback :override lsp-bridge-term-recv-doc)
     (lsp-bridge-signature-help--update :override lsp-bridge-term-signature-help-recv)
+    (lsp-bridge-monitor-post-command :override lsp-bridge-term-post-command)
     (lsp-bridge-search-backend--record-items :override lsp-bridge-term-search-recv-items))
     "advices to adapt lsp-bridge.")
 
 (defun lsp-bridge-term-active ()
+  (setq lsp-bridge-prohibit-completion t)
+  ;; (dolist (hook lsp-bridge--internal-hooks)
+  ;;   (remove-hook (nth 0 hook) (nth 1 hook) (nth 3 hook)))
   (mapc (pcase-lambda (`(,orig-fn ,how ,function))
           (advice-add orig-fn how function))
         lsp-bridge-term-advices))
