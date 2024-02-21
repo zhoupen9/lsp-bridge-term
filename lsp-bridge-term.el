@@ -31,6 +31,7 @@
 (defvar lsp-bridge-term-frame nil)
 (defvar lsp-bridge-term-candidates nil)
 (defvar lsp-bridge-term-doc-line-max 75)
+(defvar lsp-bridge-term-diagnostics-inline nil)
 
 (defvar-local lsp-bridge-term-frame-popup-point nil)
 (defvar-local lsp-bridge-term-menu-index 0)
@@ -92,6 +93,16 @@
 (defface lsp-bridge-term-default-face
   '((t :background "grey20" :foreground "grey85"))
   "Default terminal face."
+  :group 'lsp-bridge-term)
+
+(defface lsp-bridge-term-diagnostic-symbol-face
+  '((t :foreground "grey35" :underline t))
+  "Diagnostic symbol face."
+  :group 'lsp-bridge-term)
+
+(defface lsp-bridge-term-diagnostic-message-face
+  '((t :foreground "red" :inherit 'italic))
+  "Diagnostic inline message face."
   :group 'lsp-bridge-term)
 
 (defun lsp-bridge-term-can-display-p ()
@@ -214,19 +225,15 @@
                    display
                  (concat display (make-string padding ?\s)))
                "\n"))
-
         (add-face-text-property 0 (length candidate)
                                 (if (equal item-index index)
                                     'lsp-bridge-term-select-face
                                   'lsp-bridge-term-default-face)
                                 'append candidate)
-
         (insert icon)
         (insert candidate)
-
         (when (equal item-index (1- (length candidates)))
           (delete-char -1))
-
         (setq item-index (1+ item-index))))))
 
 (defun lsp-bridge-term--menu-render (pos candidates index)
@@ -285,7 +292,6 @@
   (if (< 0 (length candidates))
       (setq lsp-bridge-term-candidates candidates)
     (setq candidates lsp-bridge-term-candidates))
-
   (if pos
       (setq-local lsp-bridge-term-frame-popup-point pos)
     (let* ((bounds (acm-get-input-prefix-bound)))
@@ -293,7 +299,6 @@
                   (if (< 0 index)
                       (or (car bounds) (point))
                     (point)))))
-
   (lsp-bridge-term--create-frame-if-not-exist lsp-bridge-term-frame lsp-bridge-term-buffer "lsp-bridge-term")
   (unless (plist-get (cdr lsp-bridge-term-frame) :direction)
     (plist-put (cdr lsp-bridge-term-frame) :direction 'bottom))
@@ -405,7 +410,6 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
     (lsp-bridge-term--create-frame-if-not-exist lsp-bridge-term-frame lsp-bridge-term-buffer "lsp-bridge-term")
     (unless (plist-get (cdr lsp-bridge-term-frame) :direction)
       (plist-put (cdr lsp-bridge-term-frame) :direction 'bottom))
-
     (dolist (v actions)
       (let* ((title (plist-get v :title))
              (candicate (list :key title :label title :icon "function" :annotation "Function" :displayLabel title)))
@@ -416,8 +420,66 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
   "Receive lsp-bridge code actions."
   (lsp-bridge-term--code-action-popup-menu actions action-kind))
 
+(defun lsp-bridge-term--get-position-at-x-y (x y)
+  "Returns position at x:y."
+  (save-excursion
+    (goto-char (point-min))
+    (when (< 0 x)
+      (forward-line  x))
+    (when (< 0 y)
+      (forward-char y))
+    (point)))
+
+(defun lsp-bridge-term--get-line-end-pos (pos)
+  "Return line end position from pos."
+  (save-excursion
+    (goto-char pos)
+    (cons (line-beginning-position) (line-end-position))))
+
+(defun lsp-bridge-term--render-diagnostic (diagnostic)
+  "Render diagnostic."
+  (let ((range (plist-get diagnostic :range)))
+    (when range
+      (let* ((start (plist-get range :start))
+             (end (plist-get range :end))
+             (startp (lsp-bridge-term--get-position-at-x-y
+                      (plist-get start :line)
+                      (plist-get start :character)))
+             (endp (lsp-bridge-term--get-position-at-x-y
+                    (plist-get end :line)
+                    (plist-get end :character)))
+             (line (lsp-bridge-term--get-line-end-pos endp))
+             (font-lock-fontify-region-function 'ignore)
+             (inhibit-modification-hooks t)
+             (modified (buffer-modified-p))
+             overlay)
+        (cond
+         ((= startp endp)
+          (when (not (= (car line) (cdr line)))
+            (put-text-property (car line) (cdr line) 'face 'lsp-bridge-term-diagnostic-symbol-face)
+            (put-text-property (car line) (cdr line) 'font-lock-ignore t)))
+         (t
+          (put-text-property startp endp 'face 'lsp-bridge-term-diagnostic-symbol-face)
+          (put-text-property startp endp 'font-lock-ignore t)))
+        (when lsp-bridge-term-diagnostics-inline
+          (setq overlay (make-overlay (cdr line) (cdr line)))
+          (overlay-put overlay 'after-string
+                       (propertize
+                        (format "%s%s: %s"
+                                (make-string 10 ?\s)
+                                (plist-get diagnostic :code)
+                                (plist-get diagnostic :message))
+                        'face 'lsp-bridge-term-diagnostic-message-face)))
+        (set-buffer-modified-p modified)))))
+
 (defun lsp-bridge-term-diagnostic-recv-items (filepath filehost diagnostics diagnostic-count)
-  "Receive lsp-bridge diagnostic.")
+  "Receive lsp-bridge diagnostic."
+  (dolist (buf (buffer-list))
+    (when (string= filepath (buffer-file-name buf))
+      (with-current-buffer buf
+        (remove-overlays (point-min) (point-max))
+        (dolist (diag diagnostics)
+          (lsp-bridge-term--render-diagnostic diag))))))
 
 (defun lsp-bridge-term-signature-help-recv (helps index)
   "Receive lsp-bridge signature helps."
@@ -425,14 +487,24 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
     (let ((candidates '()))
       (unless (plist-get (cdr lsp-bridge-term-frame) :direction)
         (plist-put (cdr lsp-bridge-term-frame) :direction 'bottom))
-
       (dolist (v helps)
         (add-to-list 'candidates (list :displayLabel v)))
-
       (lsp-bridge-term--update candidates -1))))
 
 (defun lsp-bridge-term-search-recv-items (backend items)
   "Receive lsp-bridge search backend.")
+
+(cl-defmacro lsp-bridge-term--append-lines (to lines)
+  "Fill string with whitespace as padding."
+  `(setq ,to (append ,to ,lines)))
+
+(cl-defmacro lsp-bridge-term--append-lines-str (to str)
+  "Fill string with given string."
+  `(lsp-bridge-term--append-lines ,to (list ,str)))
+
+(cl-defmacro lsp-bridge-term--append-empty-line (to)
+  "Fill empty line into lines."
+  `(lsp-bridge-term--append-lines-str ,to (make-string lsp-bridge-term-doc-line-max ?\s)))
 
 (defun lsp-bridge-term--render-doc-current-line ()
   "Render doc line into rendered line or lines."
@@ -440,25 +512,24 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
         (end (line-end-position))
         (lines '()))
     (if (= begin end)
-        (setq lines (append lines (list (make-string lsp-bridge-term-doc-line-max ?\s))))
+        (lsp-bridge-term--append-empty-line lines)
       (while (< begin end)
         (let* ((visible (markdown--filter-visible begin end))
                (len (length visible))
                (padding (- lsp-bridge-term-doc-line-max len 2)))
           (cond ((= 0 len)
-                 (setq lines (append lines (list (make-string lsp-bridge-term-doc-line-max ?\s))))
+                 (lsp-bridge-term--append-empty-line lines)
                  (setq begin end))
                 ((< (- lsp-bridge-term-doc-line-max 2) len)
                  (setq end (1- end)))
                 (t
-                 (setq lines
-                       (append lines
-                               (list
-                                (format " %s%s "
-                                        (string-replace "\t" " " (buffer-substring begin end))
-                                        (if (< 0 padding)
-                                            (make-string padding ?\s)
-                                          "")))))
+                 (lsp-bridge-term--append-lines-str
+                  lines
+                  (format " %s%s "
+                          (string-replace "\t" " " (buffer-substring begin end))
+                          (if (< 0 padding)
+                              (make-string padding ?\s)
+                            "")))
                  (setq begin end)
                  (setq end (line-end-position)))))))
     lines))
@@ -469,21 +540,21 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
   (lsp-bridge-term--create-frame-if-not-exist lsp-bridge-term-frame lsp-bridge-term-buffer "lsp-bridge-term")
   (unless (plist-get (cdr lsp-bridge-term-frame) :direction)
     (plist-put (cdr lsp-bridge-term-frame) :direction 'bottom))
-
   (let ((lines '()))
     (with-current-buffer (get-buffer-create lsp-bridge-term-buffer)
       (erase-buffer)
       (insert doc)
       (gfm-view-mode)
       (font-lock-ensure)
-
       (save-excursion
         (goto-char (point-min))
         (while (not (eobp))
-          (setq lines (append lines (lsp-bridge-term--render-doc-current-line)))
+          (lsp-bridge-term--append-lines lines (lsp-bridge-term--render-doc-current-line))
           (forward-line))
         ;; add empty line at the end of doc
-        (setq lines (append lines (list (make-string lsp-bridge-term-doc-line-max ?\s))))
+        (let ((lastline (last lines)))
+          (unless (string-match "^\s*$" (car lastline))
+            (lsp-bridge-term--append-empty-line lines)))
         ;; change doc background face
         (dolist (line lines)
           (add-face-text-property 0 (length line) '((t :background "grey20")) 'append line))))
