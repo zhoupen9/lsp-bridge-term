@@ -165,7 +165,8 @@
   `(unless (popon-live-p ,frame)
      (setq position ,pos)
      (setq ,frame (popon-create (cons "" 0) position))
-     (plist-put (cdr ,frame) :popup position)))
+     (plist-put (cdr ,frame) :popup position)
+     (plist-put (cdr ,frame) :eobp nil)))
 
 (defun lsp-bridge-term--lines-max-length (lines)
   "Returns max length of given lines."
@@ -202,8 +203,6 @@
                (- cursor-x (- (+ cursor-x menu-w) textarea-width) 1))))
       (plist-put (cdr frame) :x x))
     (cond
-     ;; ((eobp)
-     ;;  (plist-put (cdr frame) :y (1+ cursor-y)))
      ;; top
      ((<= bottom-free-h menu-h)
       (plist-put (cdr frame) :direction 'top)
@@ -294,7 +293,6 @@
 
 (defun lsp-bridge-term--update (candidates index &optional pos)
   "Update terminal menu."
-  (message "lbt update.")
   (if (< 0 (length candidates))
       (setq-local lsp-bridge-term-candidates candidates)
     (setq candidates lsp-bridge-term-candidates))
@@ -329,12 +327,11 @@
   (when (and (poponp lsp-bridge-term-frame)
              (plist-get (cdr lsp-bridge-term-frame) :eobp))
     (let ((modified (buffer-modified-p)))
-      (lsp-bridge-term--disable-change-hooks)
-      (save-excursion
-        (goto-char (point-max))
-        (delete-char -1))
-      (set-buffer-modified-p modified)
-      (lsp-bridge-term--enable-change-hooks)))
+      (lsp-bridge-term--without-hooks
+       (save-excursion
+         (goto-char (point-max))
+         (delete-char -1))
+       (set-buffer-modified-p modified))))
   (setq-local lsp-bridge-term-frame nil)
   (setq-local lsp-bridge-term-menu-max -1)
   (setq-local lsp-bridge-term-menu-index 0)
@@ -361,13 +358,12 @@
          (bound-start lsp-bridge-term-frame-popup-point)
          (backend (plist-get candidate :backend))
          (candidate-expand (intern-soft (format "acm-backend-%s-candidate-expand" backend))))
-    (lsp-bridge-term--disable-change-hooks)
     (if (fboundp candidate-expand)
         (funcall candidate-expand candidate bound-start)
-      (delete-region bound-start (point))
-      (insert (plist-get candidate :label)))
-    (setq-local lsp-bridge-term-completion-point lsp-bridge-term-frame-popup-point)
-    (lsp-bridge-term--enable-change-hooks))
+      (lsp-bridge-term--without-hooks
+       (delete-region bound-start (point))
+       (insert (plist-get candidate :label))))
+    (setq-local lsp-bridge-term-completion-point lsp-bridge-term-frame-popup-point))
   (lsp-bridge-term-cancel))
 
 (defvar lsp-bridge-term-mode-map
@@ -497,27 +493,24 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
                         'face 'lsp-bridge-term-diagnostic-message-face)))
         (set-buffer-modified-p modified)))))
 
-(defun lsp-bridge-term-diagnostic-recv-items (filepath filehost diagnostics diagnostic-count))
+(defun lsp-bridge-term-diagnostic-recv-items (filepath filehost diagnostics diagnostic-count)
+  "Receive lsp-bridge diagnostic."
+  (unless (popon-live-p lsp-bridge-term-frame)
+    (dolist (buf (buffer-list))
+      (when (string= filepath (buffer-file-name buf))
+        (with-current-buffer buf
+          (remove-overlays (point-min) (point-max))
+          (dolist (diag diagnostics)
+            (lsp-bridge-term--render-diagnostic diag)))))))
 
-;; (defun lsp-bridge-term-diagnostic-recv-items (filepath filehost diagnostics diagnostic-count)
-;;   "Receive lsp-bridge diagnostic."
-;;   (unless (popon-live-p lsp-bridge-term-frame)
-;;     (dolist (buf (buffer-list))
-;;       (when (string= filepath (buffer-file-name buf))
-;;         (with-current-buffer buf
-;;           (remove-overlays (point-min) (point-max))
-;;           (dolist (diag diagnostics)
-;;             (lsp-bridge-term--render-diagnostic diag)))))))
-
-(defun lsp-bridge-term-signature-help-recv (helps index))
-
-;; (defun lsp-bridge-term-signature-help-recv (helps index)
-;;   "Receive lsp-bridge signature helps."
-;;   (unless (popon-live-p lsp-bridge-term-frame)
-;;     (let ((candidates '()))
-;;       (dolist (v helps)
-;;         (add-to-list 'candidates (list :displayLabel v)))
-;;       (lsp-bridge-term--update candidates -1))))
+(defun lsp-bridge-term-signature-help-recv (helps index)
+  )
+  ;; "Receive lsp-bridge signature helps."
+  ;; (unless (popon-live-p lsp-bridge-term-frame)
+  ;;   (let ((candidates '()))
+  ;;     (dolist (v helps)
+  ;;       (add-to-list 'candidates (list :displayLabel v)))
+  ;;     (lsp-bridge-term--update candidates -1))))
 
 (defun lsp-bridge-term-search-recv-items (backend items)
   "Receive lsp-bridge search backend.")
@@ -606,7 +599,7 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
 
 (defun lsp-bridge-term-active ()
   "Activate lsp-bridge terminal support."
-  (setq lsp-bridge-prohibit-completion t)
+  (setq-local lsp-bridge-prohibit-completion t)
   (mapc (pcase-lambda (`(,orig-fn ,how ,function))
           (advice-add orig-fn how function))
         lsp-bridge-term-advices))
