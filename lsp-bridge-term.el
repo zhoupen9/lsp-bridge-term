@@ -240,6 +240,13 @@
           (delete-char -1))
         (setq item-index (1+ item-index))))))
 
+(cl-defmacro lsp-bridge-term--popup-display ()
+  "Display popup."
+  `(progn
+      (popon-redisplay)
+      (lsp-bridge-term-mode 1)
+      (plist-put (cdr lsp-bridge-term-frame) :visible t)))
+
 (defun lsp-bridge-term--menu-render (pos candidates index)
   "Render menu."
   (let ((len (length candidates))
@@ -251,11 +258,9 @@
         (lsp-bridge-term--menu-items-render candidates index)
         (goto-char (point-min))
         (setq lines (split-string (buffer-string) "\n")))
-      (lsp-bridge-term--frame-render-lines lsp-bridge-term-frame lines)
-      (popon-redisplay)
-      (lsp-bridge-term-mode 1)
+      (lsp-bridge-term--frame-render-lines lsp-bridge-term-frame lines))
       ;;(add-hook 'pre-command-hook #'lsp-bridge-term--pre-command nil 'local)
-      (plist-put (cdr lsp-bridge-term-frame) :visible t))))
+    (lsp-bridge-term--popup-display)))
 
 (defun lsp-bridge-term--cancel-if-present ()
   "Cancel when present."
@@ -512,20 +517,32 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
 (defun lsp-bridge-term-signature-help-recv (helps index)
   "Receive lsp-bridge signature helps."
   (unless (popon-live-p lsp-bridge-term-frame)
-    (let ((lines '()) param-str)
-      (setq param-str (with-current-buffer (get-buffer-create lsp-bridge-term-buffer)
+    (lsp-bridge-term--create-frame-if-not-exist lsp-bridge-term-frame (lsp-bridge-term--get-popup-position))
+    (plist-put (cdr lsp-bridge-term-frame) :direction 'top)
+    (let ((lines '()) max-line-length)
+      (with-current-buffer (get-buffer-create lsp-bridge-term-buffer)
         (erase-buffer)
+        (insert "\n")
         (let ((i 0) str)
           (dolist (param helps)
             (setq str param)
             (when (= index i)
-              (add-face-text-property 0 (length str) '((t :foreground "red") 'append str)))
+              (add-face-text-property 0 (length str) '((t :foreground "red")) 'append str))
             (insert str)
             (when (> (length helps) (1+ i))
-              (insert ", "))))
-          (buffer-string)))
-      (add-to-list 'lines param-str 'append)
-      (lsp-bridge-term--frame-render-lines lsp-bridge-term-frame lines))))
+              (insert ", "))
+            (setq i (1+ i))))
+        (insert "\n\n")
+        (setq max-line-length (+ 2 (lsp-bridge-term--max-line-length)))
+        (goto-char (point-min))
+        (while (not (eobp))
+          (let ((line (lsp-bridge-term--render-doc-current-line #'buffer-substring max-line-length)))
+            (lsp-bridge-term--append-lines lines line))
+          (forward-line))
+        (dolist (line lines)
+          (add-face-text-property 0 (length line) '((t :background "grey20")) 'append line)))
+      (lsp-bridge-term--frame-render-lines lsp-bridge-term-frame lines))
+    (lsp-bridge-term--popup-display)))
 
 (defun lsp-bridge-term-search-recv-items (backend items)
   "Receive lsp-bridge search backend.")
@@ -538,26 +555,34 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
   "Fill string with given string."
   `(lsp-bridge-term--append-lines ,to (list ,str)))
 
-(cl-defmacro lsp-bridge-term--append-empty-line (to)
+(cl-defmacro lsp-bridge-term--append-empty-line (to max)
   "Fill empty line into lines."
-  `(lsp-bridge-term--append-lines-str ,to (make-string lsp-bridge-term-doc-line-max ?\s)))
+  `(lsp-bridge-term--append-lines-str ,to (make-string ,max ?\s)))
 
-(defun lsp-bridge-term--render-doc-current-line ()
+(defun lsp-bridge-term--render-doc-current-line (visible-fn max-len)
   "Render doc line into rendered line or lines."
   (let ((begin (line-beginning-position))
         (end (line-end-position))
         (lines '()))
     (if (= begin end)
-        (lsp-bridge-term--append-empty-line lines)
+        (lsp-bridge-term--append-empty-line lines max-len)
       (while (< begin end)
-        (let* ((visible (markdown--filter-visible begin end))
+        (let* ((visible (funcall visible-fn begin end))
                (len (length visible))
-               (padding (- lsp-bridge-term-doc-line-max len 2)))
+               (padding (- max-len len 2)))
           (cond ((= 0 len)
-                 (lsp-bridge-term--append-empty-line lines)
+                 ;; no visiable, insert empty line
+                 (lsp-bridge-term--append-empty-line lines max-len)
                  (setq begin end))
                 ((> 0 padding)
-                 (setq end (+ end padding)))
+                 ;; line is longer than `max-len', split line into multiple lines,
+                 ;; and avoid word wrapping.
+                 (let* ((pos (+ end padding))
+                        (str (reverse (buffer-substring begin pos)))
+                        (blank-index (string-match-p "[[:blank:]]" str)))
+                   (if blank-index
+                       (setq end (- pos blank-index))
+                     (setq end pos))))
                 (t
                  (lsp-bridge-term--append-lines-str
                   lines
@@ -570,35 +595,46 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
                  (setq end (line-end-position)))))))
     lines))
 
+(defun lsp-bridge-term--max-line-length ()
+  "Returns max line length of current buffer."
+  (save-excursion
+    (goto-char (point-min))
+    (let ((max-len 0))
+      (while (not (eobp))
+        (let ((len (- (line-end-position) (line-beginning-position))))
+          (when (< max-len len)
+            (setq max-len len)))
+        (forward-line))
+      (if (< lsp-bridge-term-doc-line-max max-len)
+          lsp-bridge-term-doc-line-max
+        max-len))))
+
 (defun lsp-bridge-term-recv-doc (doc)
   "Receive lsp-bridge documentation popup."
   (lsp-bridge-term--cancel-if-present)
   (lsp-bridge-term--create-frame-if-not-exist lsp-bridge-term-frame (lsp-bridge-term--get-popup-position))
-  (let ((lines '()))
+  (let ((lines '()) max-line-length)
     (with-current-buffer (get-buffer-create lsp-bridge-term-buffer)
       (erase-buffer)
       (insert doc)
       (gfm-view-mode)
       (font-lock-ensure)
+      (setq max-line-length (+ 2 (lsp-bridge-term--max-line-length)))
       (save-excursion
         (goto-char (point-min))
         (while (not (eobp))
-          (lsp-bridge-term--append-lines lines (lsp-bridge-term--render-doc-current-line))
+          (let ((line (lsp-bridge-term--render-doc-current-line #'markdown--filter-visible max-line-length)))
+            (lsp-bridge-term--append-lines lines line))
           (forward-line))
         ;; add empty line at the end of doc
         (let ((lastline (last lines)))
           (unless (string-match "^\s*$" (car lastline))
-            (lsp-bridge-term--append-empty-line lines)))
+            (lsp-bridge-term--append-empty-line lines max-line-length)))
         ;; change doc background face
         (dolist (line lines)
           (add-face-text-property 0 (length line) '((t :background "grey20")) 'append line))))
     (lsp-bridge-term--frame-render-lines lsp-bridge-term-frame lines))
-
-  ;; redisplay popon
-  (popon-redisplay)
-  (lsp-bridge-term-mode 1)
-  ;;(add-hook 'pre-command-hook #'lsp-bridge-term--pre-command nil 'local)
-  (plist-put (cdr lsp-bridge-term-frame) :visible t))
+  (lsp-bridge-term--popup-display))
 
 (defun lsp-bridge-term-post-command ())
 
