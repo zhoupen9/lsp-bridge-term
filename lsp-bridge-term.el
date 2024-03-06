@@ -186,7 +186,11 @@
 
 (defun lsp-bridge-term--frame-render-lines (frame lines)
   "Render popup frame lines."
-  (pcase-let* ((`(,edge-left ,edge-top ,edge-right ,edge-bottom) (window-inside-edges))
+  (when lines
+    (plist-put (cdr frame) :lines lines)
+    (plist-put (cdr frame) :width (length (car lines))))
+  (pcase-let* ((width (length (car lines)))
+               (`(,edge-left ,edge-top ,edge-right ,edge-bottom) (window-inside-edges))
                (textarea-width
                 (- (window-width)
                    (+ (- edge-left (window-left-column))
@@ -194,23 +198,28 @@
                (textarea-height (- edge-bottom edge-top))
                (`(,cursor-x . ,cursor-y) (plist-get (cdr frame) :popup))
                (`(,menu-w . ,menu-h) (popon-size frame))
+               (width-free (- edge-right edge-left))
+               (top-free-h (- cursor-y edge-top))
                (bottom-free-h (- edge-bottom edge-top cursor-y)))
-    (when lines
-      (plist-put (cdr frame) :lines lines)
-      (plist-put (cdr frame) :width (length (car lines))))
-    (let ((x (if (> textarea-width (+ cursor-x menu-w))
-                 cursor-x
-               (- cursor-x (- (+ cursor-x menu-w) textarea-width) 1))))
-      (plist-put (cdr frame) :x x))
-    (cond
-     ;; top
-     ((<= bottom-free-h menu-h)
-      (plist-put (cdr frame) :direction 'top)
-      (plist-put (cdr frame) :y (- cursor-y menu-h)))
-     ;; bottom
-     (t
-      (plist-put (cdr frame) :direction 'bottom)
-      (plist-put (cdr frame) :y (+ cursor-y 1))))))
+    (if (< width-free width)
+        (message "Window is insufficient to display content, please enlarge window.")
+      (let ((x (if (> textarea-width (+ cursor-x menu-w))
+                   cursor-x
+                 (- cursor-x (- (+ cursor-x menu-w) textarea-width) 1))))
+        (plist-put (cdr frame) :x x))
+      (cond
+       ((eq 'top (plist-get (cdr frame) :direction))
+        (plist-put (cdr frame) :y (- cursor-y menu-h)))
+       ((eq 'bottom (plist-get (cdr frame) :direction))
+        (plist-put (cdr frame) :y (+ cursor-y 1)))
+       ;; top
+       ((<= bottom-free-h menu-h)
+        (plist-put (cdr frame) :direction 'top)
+        (plist-put (cdr frame) :y (- cursor-y menu-h)))
+       ;; bottom
+       (t
+        (plist-put (cdr frame) :direction 'bottom)
+        (plist-put (cdr frame) :y (+ cursor-y 1)))))))
 
 (defun lsp-bridge-term--menu-items-render (candidates index)
   "Render menu items."
@@ -313,6 +322,7 @@
            (insert "\n")
            (set-buffer-modified-p modified)))))
     (lsp-bridge-term--create-frame-if-not-exist lsp-bridge-term-frame pos)
+    (plist-put (cdr lsp-bridge-term-frame) :direction 'bottom)
     (when end-of-this-buffer
       (plist-put (cdr lsp-bridge-term-frame) :eobp t))
     (setq-local lsp-bridge-term-menu-index index)
@@ -527,7 +537,7 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
           (dolist (param helps)
             (setq str param)
             (when (= index i)
-              (add-face-text-property 0 (length str) '((t :foreground "red")) 'append str))
+              (add-face-text-property 0 (length str) '((t :foreground "magenta3")) 'append str))
             (insert str)
             (when (> (length helps) (1+ i))
               (insert ", "))
