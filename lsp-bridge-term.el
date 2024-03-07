@@ -71,11 +71,13 @@
 (defvar lsp-bridge-term-annotation-icons
   '(("Function" . ("󰡱" lsp-bridge-term-callable-face))
     ("Keyword" . ("" lsp-bridge-term-key-face))
+    ("Special Form" . ("" lsp-bridge-term-key-face))
     ("Module" . ("" lsp-bridge-term-module-face))
     ("Method" . ("" lsp-bridge-term-callable-face))
     ("Struct" . ("" lsp-bridge-term-module-face))
     ("Snippet" . ("" lsp-bridge-term-symbol-face))
     ("Yas-Snippet" . ("" lsp-bridge-term-symbol-face))
+    ("Face" . ("󰙃" lsp-bridge-term-symbol-face))
     ("Text" . ("" lsp-bridge-term-symbol-face))
     ("Variable" . ("󰫧" lsp-bridge-term-symbol-face))
     ("Class" . ("" lsp-bridge-term-module-face))
@@ -639,8 +641,30 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
       (lsp-bridge-term--frame-render-lines lsp-bridge-term--frame lines -1 'top))
     (lsp-bridge-term--popup-display)))
 
-(defun lsp-bridge-term-search-recv-items (backend items)
-  "Receive lsp-bridge search backend.")
+(defun lsp-bridge-term--elisp-render (items)
+  "Render elisp."
+  (let ((candidates '()))
+    (dolist (item items)
+      (let ((symbol-type (acm-backend-elisp-symbol-type (intern item))))
+        (add-to-list 'candidates
+                     (list :key item
+                           :icon symbol-type
+                           :label item
+                           :displayLabel item
+                           :annotation (capitalize symbol-type)
+                           :backend "elisp")
+                     'append)))
+    (let* ((bounds (acm-get-input-prefix-bound)))
+      (setq-local lsp-bridge-term--frame-popup-point (or (car bounds) (point))))
+    (lsp-bridge-term--menu-update
+     candidates 0
+     (lsp-bridge-term--get-popup-position lsp-bridge-term--frame-popup-point))))
+
+(defun lsp-bridge-term-search-backend-recv-items (backend items)
+  "Receive lsp-bridge search backend."
+  (cond
+   ((string= "elisp" backend)
+    (lsp-bridge-term--elisp-render items))))
 
 (cl-defmacro lsp-bridge-term--append-lines (to lines)
   "Fill string with whitespace as padding."
@@ -745,7 +769,7 @@ and then render resulting text (or portion of resulting text) in `lsp-bridge-ter
     (lsp-bridge-popup-documentation--callback :override lsp-bridge-term-recv-doc)
     (lsp-bridge-signature-help--update :override lsp-bridge-term-signature-help-recv)
     (lsp-bridge-monitor-post-command :override lsp-bridge-term-post-command)
-    (lsp-bridge-search-backend--record-items :override lsp-bridge-term-search-recv-items))
+    (lsp-bridge-search-backend--record-items :override lsp-bridge-term-search-backend-recv-items))
     "advices to adapt lsp-bridge.")
 
 (defun lsp-bridge-term-active ()
