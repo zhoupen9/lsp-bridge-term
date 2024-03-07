@@ -221,7 +221,7 @@
             (cond
              ((< lsp-bridge-term-popup-min-height full-height lsp-bridge-term-popup-max-height)
               full-height)
-             ((< full-height lsp-bridge-term-popup-min-height)
+             ((<= full-height lsp-bridge-term-popup-min-height)
               full-height)
              ((< lsp-bridge-term-popup-max-height full-height)
               lsp-bridge-term-popup-max-height)))
@@ -406,7 +406,7 @@ rendering menu."
           (setq-local lsp-bridge-term--menu-index (1+ lsp-bridge-term--menu-index))
           (lsp-bridge-term--menu-update nil lsp-bridge-term--menu-index nil 'next)))
        ((eq 'doc type)
-        (when (< end lsp-bridge-term--doc-max)
+        (when (< end (1- lsp-bridge-term--doc-max))
           (setq-local lsp-bridge-term--doc-index (1+ end))
           (lsp-bridge-term--frame-render-lines
            lsp-bridge-term--frame
