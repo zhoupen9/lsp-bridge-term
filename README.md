@@ -74,14 +74,25 @@ This package simply overrides `lsp-bridge-` functions to handle LSP messages fro
 
 # Screenshots
 Code Completion
+
 ![code completion](screenshots/code-completion-popup-menu.png "Code Completion")
+
 Code Action
+
 ![code action](screenshots/code-action-popup-menu.png "Code Action")
+
 Signature
+
 ![signature](screenshots/signature-popup.png "Signature")
+
 Documentation
+
 ![documentation](screenshots/doc-popup.png "Documentation")
+
 Diagnostics Indicator
+
 ![diagnostic indicator](screenshots/diagnostic-indicator-overlay.png "Diagnostic Indicator")
+
 Dignostics Message
+
 ![diagnostic message](screenshots/diagnostic-message-overlay.png "Diagnostic Message")
