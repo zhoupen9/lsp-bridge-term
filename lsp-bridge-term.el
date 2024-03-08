@@ -152,13 +152,11 @@
 (cl-defmacro lsp-bridge-term--disable-change-hooks ()
   "Disable lsp-bridge change hooks when modifying buffer without interact with lsp backend."
   `(dolist (hook lsp-bridge--internal-hooks)
-     (message "disable lsp-bridge hooks.")
      (remove-hook (nth 0 hook) (nth 1 hook) (nth 3 hook))))
 
 (cl-defmacro lsp-bridge-term--enable-change-hooks ()
   "Enable lsp-bridge change hooks after modifying buffer."
   `(dolist (hook lsp-bridge--internal-hooks)
-     (message "enable lsp-bridge hooks.")
      (apply #'add-hook hook)))
 
 (cl-defmacro lsp-bridge-term--without-hooks (&rest body)
@@ -597,7 +595,7 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
                        (propertize
                         (format "  %s%s" (if code (format "%s: " code) "") msg)
                         'face 'lsp-bridge-term-diagnostic-message-face))
-          (overlay-put indicator 'type 'diagnostic))
+          (overlay-put overlay 'type 'diagnostic))
         (set-buffer-modified-p modified)))))
 
 (defun lsp-bridge-term-diagnostic-recv-items (filepath filehost diagnostics diagnostic-count)
