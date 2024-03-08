@@ -1,6 +1,6 @@
 lsp-bridge-term - lsp-bridge terminal support for Emacs
 ---
-This package provides a subset of LSP implementations for terminal environment based on [lsp-bridge](https://github.com/manateelazycat/lsp-bridge). It was coded in a simple streight way. For better coding experience, use *lsp-brdige* in GUI environment instead.
+This package provides a subset of LSP implementations for terminal environment based on [lsp-bridge](https://github.com/manateelazycat/lsp-bridge). It was coded in a simple streight way. For better coding experience, use *lsp-bridge* in GUI environment instead.
 
 # Features
 Support display popup in terminal.
