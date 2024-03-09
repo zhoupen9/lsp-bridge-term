@@ -26,22 +26,49 @@
 (require 'acm)
 (require 'popon)
 
-(defvar lsp-bridge-term-buffer "*lsp-bridge-term*")
-(defvar lsp-bridge-term-doc-line-max 75)
-(defvar lsp-bridge-term-popup-min-height 5)
-(defvar lsp-bridge-term-popup-max-height 25)
-(defvar lsp-bridge-term-diagnostics-inline nil)
+(defvar lsp-bridge-term-buffer "*lsp-bridge-term*"
+  "lsp-bridge-term working buffer name.")
 
-(defvar-local lsp-bridge-term--frame nil)
-(defvar-local lsp-bridge-term--lines nil)
-(defvar-local lsp-bridge-term--doc nil)
-(defvar-local lsp-bridge-term--frame-popup-point nil)
-(defvar-local lsp-bridge-term--menu-index 0)
-(defvar-local lsp-bridge-term--menu-max -1)
-(defvar-local lsp-bridge-term--doc-index 0)
-(defvar-local lsp-bridge-term--doc-max -1)
-(defvar-local lsp-bridge-term--completion-point nil)
-(defvar-local lsp-bridge-term--code-actions nil)
+(defvar lsp-bridge-term-doc-line-max 75
+  "Max line length to display doc, default 75.")
+
+(defvar lsp-bridge-term-popup-min-height 5
+  "Minimum height to display popup, when `window' spacing is insufficient,
+display content in `other-window', default 5.")
+
+(defvar lsp-bridge-term-popup-max-height 25
+  "Maximum popup height, when content size is larger than max height,
+popup only display in max-height, use `lsp-bridge-term-select-next' to scroll, default 25.")
+
+(defvar lsp-bridge-term-diagnostics-inline nil
+  "Should display diagnostics message overlays, default `nil'.")
+
+(defvar-local lsp-bridge-term--frame nil
+  "Popup frame.")
+
+(defvar-local lsp-bridge-term--lines nil
+  "Caching current render lines for menu selection and doc scrolling.")
+
+(defvar-local lsp-bridge-term--frame-popup-point nil
+  "Popup point.")
+
+(defvar-local lsp-bridge-term--menu-index 0
+  "Current menu selection index.")
+
+(defvar-local lsp-bridge-term--menu-max -1
+  "Max menu selections.")
+
+(defvar-local lsp-bridge-term--doc-index 0
+  "Current doc scrolling position.")
+
+(defvar-local lsp-bridge-term--doc-max -1
+  "Max doc scorlling position.")
+
+(defvar-local lsp-bridge-term--last-command nil
+  "Last executed command.")
+
+(defvar-local lsp-bridge-term--code-actions nil
+  "Caching current code actions for selection.")
 
 (defun lsp-bridge-term-diagnostics-inline-toggle ()
   "Toogle display inline diagnostics."
@@ -195,8 +222,8 @@
 
 (defun lsp-bridge-term--display-in-other-window ()
   "Display content in other window."
-  (unless (get-buffer-window "*lsp-bridge-term*")
-    (switch-to-buffer-other-window "*lsp-bridge-term*")))
+  (unless (get-buffer-window lsp-bridge-term-buffer)
+    (switch-to-buffer-other-window lsp-bridge-term-buffer)))
 
 (defun lsp-bridge-term--frame-render-lines (frame lines &optional index direction action)
   "Render LINES or portion of LINES in the FRAME with preferred DIRECTION."
@@ -339,14 +366,12 @@ of (portion of resulting text) in `lsp-bridge-term--frame'."
 (defun lsp-bridge-term--trigger-completion ()
   "Returns true when current point should trigger completion."
   (cond
-   ;; ((and lsp-bridge-term--completion-point lsp-bridge-term--frame-popup-point)
-   ;;       (not (= lsp-bridge-term--completion-point lsp-bridge-term--frame-popup-point)))
-        ((bounds-of-thing-at-point 'symbol) (lsp-bridge-term--symbol-end))
-        ((bounds-of-thing-at-point 'whitespace) (lsp-bridge-term--trigger-end))
-        (t nil)))
+   ((bounds-of-thing-at-point 'symbol) (lsp-bridge-term--symbol-end))
+   ((bounds-of-thing-at-point 'whitespace) (lsp-bridge-term--trigger-end))
+   (t nil)))
 
 (defun lsp-bridge-term--menu-update (candidates index &optional pos action)
-  "Update terminal menu. Insert \n when at end of current buffer before
+  "Update terminal menu. Insert `\n' when at end of current buffer before
 rendering menu."
   (if (< 0 (length candidates))
       (setq-local lsp-bridge-term--lines candidates)
@@ -456,8 +481,7 @@ rendering menu."
               (funcall candidate-expand candidate bound-start)
             (lsp-bridge-term--without-hooks
              (delete-region bound-start (point))
-             (insert (plist-get candidate :label))))
-          (setq-local lsp-bridge-term--completion-point lsp-bridge-term--frame-popup-point)))
+             (insert (plist-get candidate :label))))))
        ((eq 'code-action type)
         (let ((code-action (nth lsp-bridge-term--menu-index lsp-bridge-term--code-actions)))
           (lsp-bridge-code-action--fix-do code-action))))
@@ -485,9 +509,13 @@ rendering menu."
   (unless (acm-match-symbol-p lsp-bridge-term--commands this-command)
     (lsp-bridge-term--cancel-if-present)))
 
+(defun lsp-bridge-term--post-command ()
+  "Function execute after executing command."
+  (setq-local lsp-bridge-term--last-command this-command))
+
 (defun lsp-bridge-term-overriding-key-setup ()
-  "Some key define in language mode map will conflict with lsp-bridge-term-mode map.
-So we use `minor-mode-overriding-map-alist' to override key, make sure all keys in lsp-bridge-term-mode can response."
+  "Some key define in language mode map will conflict with `lsp-bridge-term-mode' map.
+So we use `minor-mode-overriding-map-alist' to override key, make sure all keys in `lsp-bridge-term-mode' can response."
   (let ((override-map (make-sparse-keymap)))
     (define-key override-map [?\C-m] 'lsp-bridge-term-complete)))
 
@@ -496,13 +524,14 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
   "LSP Bridge Terminal minor mode."
   :keymap lsp-bridge-term-mode-map
   :init-value nil
-  ;; Set override map, avoid some language mode map conflict with lsp-bridge-term-mode map.
+  ;; Set override map, avoid some language mode map conflict with `lsp-bridge-term-mode' map.
   (lsp-bridge-term-overriding-key-setup))
 
 (defun lsp-bridge-term-completion-recv-items (filename filehost candidates position server-name
                                            completion-trigger-characters server-names)
   "Receive lsp-bridge completion."
   (cond
+   ((eq lsp-bridge-term--last-command #'lsp-bridge-term-complete) nil)
    ((or (= 0 (length candidates))
         (not (lsp-bridge-term--trigger-completion)))
     (lsp-bridge-term--cancel-if-present))
@@ -511,8 +540,8 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
       (lsp-bridge-term-cancel))
     (lsp-bridge--with-file-buffer
         filename filehost
-        ;; `acm-backend-lsp-candidate-expand` needs `acm-backend-lsp-completion-position` to be set
-        ;; in `lsp-bridge-term-complete` function when select candidate.
+        ;; `acm-backend-lsp-candidate-expand' needs `acm-backend-lsp-completion-position' to be set
+        ;; in `lsp-bridge-term-complete' function when select candidate.
         (setq-local acm-backend-lsp-completion-position position)
         (let ((completion-table (make-hash-table :test 'equal)))
           (dolist (item candidates)
@@ -758,15 +787,13 @@ and then render resulting text (or portion of resulting text) in `lsp-bridge-ter
     (lsp-bridge-term--frame-render-lines lsp-bridge-term--frame lines 0 nil nil))
   (lsp-bridge-term--popup-display))
 
-(defun lsp-bridge-term-post-command ())
-
 (defvar lsp-bridge-term-advices
   '((lsp-bridge-code-action--fix :override lsp-bridge-term-code-action-recv-actions)
     (lsp-bridge-completion--record-items :override lsp-bridge-term-completion-recv-items)
     (lsp-bridge-diagnostic--render :override lsp-bridge-term-diagnostic-recv-items)
     (lsp-bridge-popup-documentation--callback :override lsp-bridge-term-recv-doc)
     (lsp-bridge-signature-help--update :override lsp-bridge-term-signature-help-recv)
-    (lsp-bridge-monitor-post-command :override lsp-bridge-term-post-command)
+    (lsp-bridge-monitor-post-command :override lsp-bridge-term--post-command)
     (lsp-bridge-search-backend--record-items :override lsp-bridge-term-search-backend-recv-items))
     "advices to adapt lsp-bridge.")
 
