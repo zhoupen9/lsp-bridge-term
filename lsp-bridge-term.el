@@ -70,6 +70,9 @@ popup only display in max-height, use `lsp-bridge-term-select-next' to scroll, d
 (defvar-local lsp-bridge-term--code-actions nil
   "Caching current code actions for selection.")
 
+(defvar-local lsp-bridge-term--diagnostics nil
+  "Caching diagnostics.")
+
 (defun lsp-bridge-term-diagnostics-inline-toggle ()
   "Toogle display inline diagnostics."
   (interactive)
@@ -487,6 +490,28 @@ rendering menu."
           (lsp-bridge-code-action--fix-do code-action))))
       (lsp-bridge-term-cancel))))
 
+(defun lsp-bridge-term-next-error ()
+  "Goto next error if present."
+  (interactive)
+  (when lsp-bridge-term--diagnostics
+    (let ((pos (point)))
+      (catch 'found
+        (dolist (diagnostic lsp-bridge-term--diagnostics)
+          (when (> diagnostic pos)
+            (goto-char diagnostic)
+            (throw 'found diagnostic)))))))
+
+(defun lsp-bridge-term-prev-error ()
+  "Goto previous error if present."
+  (interactive)
+  (when lsp-bridge-term--diagnostics
+    (let ((pos (point)))
+      (catch 'found
+        (dolist (diagnostic (reverse lsp-bridge-term--diagnostics))
+          (when (< diagnostic pos)
+            (goto-char diagnostic)
+            (throw 'found diagnostic)))))))  
+
 (defvar lsp-bridge-term-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map [remap next-line] #'lsp-bridge-term-select-next)
@@ -629,12 +654,19 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
 
 (defun lsp-bridge-term-diagnostic-recv-items (filepath filehost diagnostics diagnostic-count)
   "Receive lsp-bridge diagnostic."
-  (unless (popon-live-p lsp-bridge-term--frame)
-    (dolist (buf (buffer-list))
-      (when (string= filepath (buffer-file-name buf))
-        (with-current-buffer buf
-          (remove-overlays (point-min) (point-max) 'type 'diagnostic)
-          (dolist (diag diagnostics)
+  (setq-local lsp-bridge-term--diagnostics nil)
+  (dolist (buf (buffer-list))
+    (when (string= filepath (buffer-file-name buf))
+      (with-current-buffer buf
+        (remove-overlays (point-min) (point-max) 'type 'diagnostic)
+        (dolist (diag diagnostics)
+          (when-let* ((range (plist-get diag :range))
+                      (start (plist-get range :start))
+                      (line (plist-get start :line))
+                      (ch (plist-get start :character))
+                      (pos (lsp-bridge-term--get-position-at-x-y line ch)))
+            (add-to-list 'lsp-bridge-term--diagnostics pos))          
+          (unless (popon-live-p lsp-bridge-term--frame)
             (lsp-bridge-term--render-diagnostic diag)))))))
 
 (defun lsp-bridge-term-signature-help-recv (helps index)
@@ -800,12 +832,16 @@ and then render resulting text (or portion of resulting text) in `lsp-bridge-ter
 (defun lsp-bridge-term-active ()
   "Activate lsp-bridge terminal support."
   (setq-local lsp-bridge-prohibit-completion t)
+  (global-set-key "\C-c\C-n" #'lsp-bridge-term-next-error)
+  (global-set-key "\C-c\C-p" #'lsp-bridge-term-prev-error)
   (mapc (pcase-lambda (`(,orig-fn ,how ,function))
           (advice-add orig-fn how function))
         lsp-bridge-term-advices))
 
 (defun lsp-bridge-term-deactive ()
   "Deactivate lsp-bridge terminal support."
+  (global-unset-key "\C-c\C-n")
+  (global-unset-key "\C-c\C-p")
   (mapc (pcase-lambda (`( ,orig-fn ,_ ,function ))
           (advice-remove orig-fn function))
         lsp-bridge-term-advices))
