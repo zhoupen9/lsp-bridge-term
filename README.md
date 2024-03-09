@@ -40,7 +40,7 @@ Add following configuration when use `use-package`.
        (with-eval-after-load 'acm (require 'lsp-bridge-term))))))
 ```
 # Keymap
-Default key bindings
+Default key bindings for `lsp-bridge-term` minor mode, works when popup is present.
 
 | Key   | Command                     | Description                                          |
 |-------|-----------------------------|------------------------------------------------------|
@@ -51,6 +51,12 @@ Default key bindings
 | C-m   | lsp-bridge-term-complete    | select menu or close doc                             |
 | Enter | lsp-bridge-term-complete    | same as C-m                                          |
 | C-g   | lsp-bridge-term-cancel      | cancel any popup if present                          |
+
+Global key bindings.
+| key     | Command                    | Description                    |
+|---------|----------------------------|--------------------------------|
+| C-c C-n | lsp-bridge-term-next-error | goto next error if present     |
+| C-c C-p | lsp-bridge-term-prev-error | goto previous error if present |
 
 Use `lsp-bridge` key bindings to popup `documentation` and `code action`.
 # Command
