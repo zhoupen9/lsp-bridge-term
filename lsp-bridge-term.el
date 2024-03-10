@@ -430,6 +430,11 @@ rendering menu."
     (pcase-let ((type (plist-get (cdr lsp-bridge-term--frame) :type))
                 (`(,begin . ,end) (plist-get (cdr lsp-bridge-term--frame) :display)))
       (cond
+       ((eq 'signature type)
+        (lsp-bridge-term--cancel-if-present)
+        (let ((col (current-column)))
+          (forward-line)
+          (move-to-column col)))
        ((or (eq 'completion type) (eq 'code-action type))
         (unless (or (= -1 lsp-bridge-term--menu-index)
                     (= lsp-bridge-term--menu-index (1- lsp-bridge-term--menu-max)))
@@ -453,6 +458,11 @@ rendering menu."
     (pcase-let ((type (plist-get (cdr lsp-bridge-term--frame) :type))
                 (`(,begin . ,end) (plist-get (cdr lsp-bridge-term--frame) :display)))
       (cond
+       ((eq 'signature type)
+        (lsp-bridge-term--cancel-if-present)
+        (let ((col (current-column)))
+          (forward-line -1)
+          (move-to-column col)))
        ((or (eq 'completion type) (eq 'code-action type))
         (unless (or (= -1 lsp-bridge-term--menu-index)
                     (= lsp-bridge-term--menu-index 0))
@@ -475,6 +485,9 @@ rendering menu."
   (when (popon-live-p lsp-bridge-term--frame)
     (let ((type (plist-get (cdr lsp-bridge-term--frame) :type)))
       (cond
+       ((eq 'signature type)
+        (lsp-bridge-term--cancel-if-present)
+        (insert ?\n))
        ((eq 'completion type)
         (let* ((candidate (nth lsp-bridge-term--menu-index lsp-bridge-term--lines))
                (bound-start lsp-bridge-term--frame-popup-point)
@@ -527,7 +540,8 @@ rendering menu."
   "Keymap used when popup is shown.")
 
 (defvar lsp-bridge-term--commands
-  '(lsp-bridge-term-select-next lsp-bridge-term-select-prev lsp-bridge-term-complete))
+  '(lsp-bridge-term-select-next lsp-bridge-term-select-prev lsp-bridge-term-complete)
+  "LSP bridge terminal minor mode supported interactive commands.")
 
 (defun lsp-bridge-term--pre-command ()
   "Function execute before executing command."
@@ -672,7 +686,7 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
 (defun lsp-bridge-term-signature-help-recv (helps index)
   "Receive lsp-bridge signature helps."
   (unless (popon-live-p lsp-bridge-term--frame)
-    (lsp-bridge-term--create-frame-if-not-exist 'doc lsp-bridge-term--frame (lsp-bridge-term--get-popup-position))
+    (lsp-bridge-term--create-frame-if-not-exist 'signature lsp-bridge-term--frame (lsp-bridge-term--get-popup-position))
     (let ((lines '()) max-line-length)
       (with-current-buffer (get-buffer-create lsp-bridge-term-buffer)
         (read-only-mode 0)
