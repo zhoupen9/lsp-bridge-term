@@ -237,7 +237,7 @@ popup only display in max-height, use `lsp-bridge-term-select-next' to scroll, d
                       (lsp-bridge-term-line-number-display-width))))
                (textarea-height (- edge-bottom edge-top))
                (`(,cursor-x . ,cursor-y) (plist-get (cdr frame) :popup))
-               (top-free-h (- cursor-y edge-top))
+               (top-free-h cursor-y)
                (bottom-free-h (- edge-bottom edge-top cursor-y))
                (display-width (length (car lines)))
                (full-height (length lines))
