@@ -527,8 +527,8 @@ rendering menu."
 
 (defvar lsp-bridge-term-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map [remap next-line] #'lsp-bridge-term-select-next)
-    (define-key map [remap previous-line] #'lsp-bridge-term-select-prev)
+    (define-key map "\M-n" #'lsp-bridge-term-select-next)
+    (define-key map "\M-p" #'lsp-bridge-term-select-prev)
     (define-key map [down] #'lsp-bridge-term-select-next)
     (define-key map [up] #'lsp-bridge-term-select-prev)
     (define-key map [tab]  #'lsp-bridge-term-complete)
