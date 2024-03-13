@@ -43,6 +43,9 @@ popup only display in max-height, use `lsp-bridge-term-select-next' to scroll, d
 (defvar lsp-bridge-term-diagnostics-inline nil
   "Should display diagnostics message overlays, default `nil'.")
 
+(defvar lsp-bridge-term-popup-wait-time 0.1
+  "Completion popup after idle in seconds.")
+
 (defvar-local lsp-bridge-term--frame nil
   "Popup frame.")
 
@@ -72,6 +75,15 @@ popup only display in max-height, use `lsp-bridge-term-select-next' to scroll, d
 
 (defvar-local lsp-bridge-term--diagnostics nil
   "Caching diagnostics.")
+
+(defvar-local lsp-bridge-term--completion-timer nil
+  "Completion popup timer.")
+
+(defvar-local lsp-bridge-term--signature-timer nil
+  "Signature popup timer.")
+
+(defvar-local lsp-bridge-term--diagnostics-timer nil
+  "Diagnostics render timer.")
 
 (defun lsp-bridge-term-diagnostics-inline-toggle ()
   "Toogle display inline diagnostics."
@@ -178,6 +190,12 @@ popup only display in max-height, use `lsp-bridge-term-select-next' to scroll, d
   (if (bound-and-true-p display-line-numbers-mode)
       (+ (line-number-display-width) 2)
     0))
+
+(cl-defmacro lsp-bridge-term--cancel-timer (timer)
+  "Cancel TIMER when timer is a `timer'."
+  `(when (timerp ,timer)
+     (cancel-timer ,timer)
+     (setq-local ,timer nil)))
 
 (cl-defmacro lsp-bridge-term--disable-change-hooks ()
   "Disable lsp-bridge change hooks when modifying buffer without interact with lsp backend."
@@ -322,7 +340,7 @@ popup only display in max-height, use `lsp-bridge-term-select-next' to scroll, d
       (popon-redisplay)
       (lsp-bridge-term-mode 1)
       (plist-put (cdr lsp-bridge-term--frame) :visible t)
-      (add-hook 'pre-command-hook #'lsp-bridge-term--pre-command nil 'local)))
+      (add-hook 'pre-command-hook #'lsp-bridge-term--pre-command nil t)))
 
 (defun lsp-bridge-term--menu-render (pos candidates index &optional action)
   "Render menu in `lsp-bridge-term-buffer' and then render resulting text
@@ -404,7 +422,7 @@ rendering menu."
     (when (eq major-mode 'gfm-view-mode)
       (gfm-view-mode)
       (read-only-mode 0)))
-  (remove-hook 'pre-command-hook #'lsp-bridge-term--pre-command 'local)
+  (remove-hook 'pre-command-hook #'lsp-bridge-term--pre-command t)
   (popon-kill-all)
   ;;(when (bufferp lsp-bridge-term-buffer)
   ;;  (kill-buffer lsp-bridge-term-buffer))
@@ -588,9 +606,13 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
             (puthash (plist-get item :key) item completion-table))))
     (let* ((bounds (acm-get-input-prefix-bound)))
       (setq-local lsp-bridge-term--frame-popup-point (or (car bounds) (point))))
-    (lsp-bridge-term--menu-update
-     candidates 0
-     (lsp-bridge-term--get-popup-position lsp-bridge-term--frame-popup-point)))))
+    (lsp-bridge-term--cancel-timer lsp-bridge-term--completion-timer)
+    (setq-local lsp-bridge-term--completion-timer
+                (run-with-idle-timer
+                 lsp-bridge-term-popup-wait-time nil
+                 #'lsp-bridge-term--menu-update
+                 candidates 0
+                 (lsp-bridge-term--get-popup-position lsp-bridge-term--frame-popup-point))))))
 
 (defun lsp-bridge-term--code-action-popup-menu (actions action)
   "Popup code action menu."
@@ -666,24 +688,37 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
           (overlay-put overlay 'type 'diagnostic))
         (set-buffer-modified-p modified)))))
 
+(defun lsp-bridge-term-diagnostics-render (buffer diagnostics)
+  "Render diagnostic items."
+  (with-current-buffer buffer
+    (unless (popon-live-p lsp-bridge-term--frame)
+      (dolist (diag diagnostics)
+        (lsp-bridge-term--render-diagnostic diag)))))
+
 (defun lsp-bridge-term-diagnostic-recv-items (filepath filehost diagnostics diagnostic-count)
   "Receive lsp-bridge diagnostic."
-  (setq-local lsp-bridge-term--diagnostics nil)
-  (dolist (buf (buffer-list))
-    (when (string= filepath (buffer-file-name buf))
-      (with-current-buffer buf
-        (remove-overlays (point-min) (point-max) 'type 'diagnostic)
-        (dolist (diag diagnostics)
-          (when-let* ((range (plist-get diag :range))
-                      (start (plist-get range :start))
-                      (line (plist-get start :line))
-                      (ch (plist-get start :character))
-                      (pos (lsp-bridge-term--get-position-at-x-y line ch)))
-            (add-to-list 'lsp-bridge-term--diagnostics pos))          
-          (unless (popon-live-p lsp-bridge-term--frame)
-            (lsp-bridge-term--render-diagnostic diag)))))))
+  (catch 'found
+    (dolist (buf (buffer-list))
+      (when (string= filepath (buffer-file-name buf))
+        (with-current-buffer buf
+          (setq-local lsp-bridge-term--diagnostics nil)
+          (remove-overlays (point-min) (point-max) 'type 'diagnostic)
+          (dolist (diag diagnostics)
+            (when-let* ((range (plist-get diag :range))
+                        (start (plist-get range :start))
+                        (line (plist-get start :line))
+                        (ch (plist-get start :character))
+                        (pos (lsp-bridge-term--get-position-at-x-y line ch)))
+              (add-to-list 'lsp-bridge-term--diagnostics pos 'append)))
+          (lsp-bridge-term--cancel-timer lsp-bridge-term--diagnostics-timer)
+          (setq-local lsp-bridge-term--diagnostics-timer
+                      (run-with-idle-timer
+                       lsp-bridge-term-popup-wait-time nil
+                       #'lsp-bridge-term-diagnostics-render
+                       buf diagnostics)))
+        (throw 'found buf)))))
 
-(defun lsp-bridge-term-signature-help-recv (helps index)
+(defun lsp-bridge-term-signature-help-render (helps index)
   "Receive lsp-bridge signature helps."
   (unless (popon-live-p lsp-bridge-term--frame)
     (lsp-bridge-term--create-frame-if-not-exist 'signature lsp-bridge-term--frame (lsp-bridge-term--get-popup-position))
@@ -714,6 +749,15 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
       (lsp-bridge-term--frame-render-lines lsp-bridge-term--frame lines -1 'top))
     (lsp-bridge-term--popup-display)))
 
+(defun lsp-bridge-term-signature-help-recv (helps index)
+  "Receive lsp-bridge signature helps."
+  (lsp-bridge-term--cancel-timer lsp-bridge-term--signature-timer)
+  (setq-local lsp-bridge-term--signature-timer
+              (run-with-idle-timer
+               lsp-bridge-term-popup-wait-time nil
+               #'lsp-bridge-term-signature-help-render
+               helps index)))
+
 (defun lsp-bridge-term--elisp-render (items)
   "Render elisp."
   (let ((candidates '()))
@@ -729,9 +773,13 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
                      'append)))
     (let* ((bounds (acm-get-input-prefix-bound)))
       (setq-local lsp-bridge-term--frame-popup-point (or (car bounds) (point))))
-    (lsp-bridge-term--menu-update
-     candidates 0
-     (lsp-bridge-term--get-popup-position lsp-bridge-term--frame-popup-point))))
+    (lsp-bridge-term--cancel-timer lsp-bridge-term--completion-timer)
+    (setq-local lsp-bridge-term--completion-timer
+                (run-with-idle-timer
+                 lsp-bridge-term-popup-wait-time nil
+                 #'lsp-bridge-term--menu-update
+                 candidates 0
+                 (lsp-bridge-term--get-popup-position lsp-bridge-term--frame-popup-point)))))
 
 (defun lsp-bridge-term-search-backend-recv-items (backend items)
   "Receive lsp-bridge search backend."
@@ -856,6 +904,9 @@ and then render resulting text (or portion of resulting text) in `lsp-bridge-ter
   "Deactivate lsp-bridge terminal support."
   (global-unset-key "\C-c\C-n")
   (global-unset-key "\C-c\C-p")
+  (lsp-bridge-term--cancel-timer sp-bridge-term--completion-timer)
+  (lsp-bridge-term--cancel-timer lsp-bridge-term--signature-timer)
+  (lsp-bridge-term--cancel-timer lsp-bridge-term--diagnostics-timer)
   (mapc (pcase-lambda (`( ,orig-fn ,_ ,function ))
           (advice-remove orig-fn function))
         lsp-bridge-term-advices))
