@@ -53,10 +53,11 @@ Default key bindings for `lsp-bridge-term` minor mode, works when popup is prese
 | C-g   | lsp-bridge-term-cancel      | cancel any popup if present                          |
 
 Global key bindings.
-| key     | Command                    | Description                    |
-|---------|----------------------------|--------------------------------|
-| C-c C-n | lsp-bridge-term-next-error | goto next error if present     |
-| C-c C-p | lsp-bridge-term-prev-error | goto previous error if present |
+| key     | Command                                 | Description                                  |
+|---------|-----------------------------------------|----------------------------------------------|
+| C-c C-n | lsp-bridge-term-next-error              | goto next error if present                   |
+| C-c C-p | lsp-bridge-term-prev-error              | goto previous error if present               |
+| C-c C-d | lsp-bridge-term-show-diagnistic-message | show diagnostic message at cursor if prenset |
 
 Use `lsp-bridge` key bindings to popup `documentation` and `code action`.
 # Command
@@ -67,6 +68,7 @@ Use `lsp-bridge` key bindings to popup `documentation` and `code action`.
 - `lsp-bridge-term-popup-min-height` default `5`, minimum height to display popup. When `window` space is insufficient, open doc in `other window`.
 - `lsp-bridge-term-popup-max-height` default `25`, maximum height to display popup. When displaying content is more than this, popup only display portion of content with this height, use `C-n` to scroll popup to see hiding content.
 - `lsp-bridge-term-diagnostics-inline` default `nil`, when `t`, display diagnostic messages in `overlay`s. Use `lsp-bridge-term-diagnostics-inline-toggle` function to toggle on/off.
+- `lsp-bridge-term-popup-wait-time` default `0.1` (100ms), wait idle time in seconds to popup.
 
 # Customization
 Customization not supported yet, which means nerd font icons, faces and etc are *hardcoded*, helps requires.
@@ -75,7 +77,7 @@ Customization not supported yet, which means nerd font icons, faces and etc are 
 This package simply overrides `lsp-bridge-` functions to handle LSP messages from python end, instead of implementing `acm`.
 - Features supported by `acm` may be missing in terminal environment
 - Performance may degrade in terminal environment
-- Without `timer`, `cache` and display popup directly when receiving LSP message brings *input lag*
+- ~~Without `timer`, `cache` and display popup directly when receiving LSP message brings *input lag*~~
 - Varies backend not supported.
 
 # Screenshots

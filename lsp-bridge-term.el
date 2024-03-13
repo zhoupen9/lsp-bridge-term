@@ -528,9 +528,10 @@ rendering menu."
     (let ((pos (point)))
       (catch 'found
         (dolist (diagnostic lsp-bridge-term--diagnostics)
-          (when (> diagnostic pos)
-            (goto-char diagnostic)
-            (throw 'found diagnostic)))))))
+          (when-let ((diag (plist-get diagnostic :start)))
+            (when (< pos diag)
+              (goto-char diag)
+              (throw 'found diag))))))))
 
 (defun lsp-bridge-term-prev-error ()
   "Goto previous error if present."
@@ -539,9 +540,44 @@ rendering menu."
     (let ((pos (point)))
       (catch 'found
         (dolist (diagnostic (reverse lsp-bridge-term--diagnostics))
-          (when (< diagnostic pos)
-            (goto-char diagnostic)
-            (throw 'found diagnostic)))))))  
+          (when-let ((diag (plist-get diagnostic :start)))
+            (when (> pos diag)
+              (goto-char diag)
+              (throw 'found diag))))))))
+
+(defun lsp-bridge-term--get-diagnostic-at-pos (pos)
+  "Returns diagnostic at POS if present, or returns `nil'."
+  (catch 'found
+    (dolist (diagnostic lsp-bridge-term--diagnostics)
+      (when-let ((start (plist-get diagnostic :start))
+                 (end (plist-get diagnostic :end)))
+        (when (<= start pos end)
+          (throw 'found diagnostic))))))
+
+(defun lsp-bridge-term-show-diagnostic-message ()
+  "Show diagnostic message popup at POS."
+  (interactive)
+  (when-let ((diagnostic (lsp-bridge-term--get-diagnostic-at-pos (point))))
+    (lsp-bridge-term--cancel-if-present)
+    (lsp-bridge-term--create-frame-if-not-exist 'diagnostics lsp-bridge-term--frame (lsp-bridge-term--get-popup-position))
+    (let ((lines '()) max-line-length)
+      (with-current-buffer (get-buffer-create lsp-bridge-term-buffer)
+        (read-only-mode 0)
+        (erase-buffer)
+        (insert "\n")
+        (insert (propertize (plist-get diagnostic :message) 'face '((t :foreground "red"))))
+        (insert "\n\n")
+        (read-only-mode 1)
+        (setq max-line-length (+ 2 (lsp-bridge-term--max-line-length)))
+        (goto-char (point-min))
+        (while (not (eobp))
+          (let ((line (lsp-bridge-term--render-doc-current-line #'buffer-substring max-line-length)))
+            (lsp-bridge-term--append-lines lines line))
+          (forward-line))
+        (dolist (line lines)
+          (add-face-text-property 0 (length line) '((t :background "grey20")) 'append line)))
+      (lsp-bridge-term--frame-render-lines lsp-bridge-term--frame lines -1 'top))
+    (lsp-bridge-term--popup-display)))
 
 (defvar lsp-bridge-term-mode-map
   (let ((map (make-sparse-keymap)))
@@ -706,10 +742,12 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
           (dolist (diag diagnostics)
             (when-let* ((range (plist-get diag :range))
                         (start (plist-get range :start))
-                        (line (plist-get start :line))
-                        (ch (plist-get start :character))
-                        (pos (lsp-bridge-term--get-position-at-x-y line ch)))
-              (add-to-list 'lsp-bridge-term--diagnostics pos 'append)))
+                        (end (plist-get range :end))
+                        (start-pos (lsp-bridge-term--get-position-at-x-y (plist-get start :line) (plist-get start :character)))
+                        (end-pos (lsp-bridge-term--get-position-at-x-y (plist-get end :line) (plist-get end :character))))
+              (add-to-list 'lsp-bridge-term--diagnostics
+                           (list :start start-pos :end end-pos :message (plist-get diag :message))
+                           'append)))
           (lsp-bridge-term--cancel-timer lsp-bridge-term--diagnostics-timer)
           (setq-local lsp-bridge-term--diagnostics-timer
                       (run-with-idle-timer
@@ -896,6 +934,7 @@ and then render resulting text (or portion of resulting text) in `lsp-bridge-ter
   (setq-local lsp-bridge-prohibit-completion t)
   (global-set-key "\C-c\C-n" #'lsp-bridge-term-next-error)
   (global-set-key "\C-c\C-p" #'lsp-bridge-term-prev-error)
+  (global-set-key "\C-c\C-d" #'lsp-bridge-term-show-diagnostic-message)
   (mapc (pcase-lambda (`(,orig-fn ,how ,function))
           (advice-add orig-fn how function))
         lsp-bridge-term-advices))
@@ -904,6 +943,7 @@ and then render resulting text (or portion of resulting text) in `lsp-bridge-ter
   "Deactivate lsp-bridge terminal support."
   (global-unset-key "\C-c\C-n")
   (global-unset-key "\C-c\C-p")
+  (global-unset-key "\C-c\C-d")
   (lsp-bridge-term--cancel-timer sp-bridge-term--completion-timer)
   (lsp-bridge-term--cancel-timer lsp-bridge-term--signature-timer)
   (lsp-bridge-term--cancel-timer lsp-bridge-term--diagnostics-timer)
