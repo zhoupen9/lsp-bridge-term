@@ -101,6 +101,10 @@ Diagnostics Indicator
 
 ![diagnostic indicator](screenshots/diagnostic-indicator-overlay.png "Diagnostic Indicator")
 
-Dignostics Message
+Diagnostics Message
 
 ![diagnostic message](screenshots/diagnostic-message-overlay.png "Diagnostic Message")
+
+Diagnostic message popup
+
+![diagnostic message popup](screenshots/diagnostic-message-popup.png "Diagnostic Message popup")
