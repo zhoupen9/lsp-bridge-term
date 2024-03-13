@@ -439,7 +439,9 @@ rendering menu."
   (setq-local lsp-bridge-term--menu-index 0)
   (setq-local lsp-bridge-term--doc-index 0)
   (setq-local lsp-bridge-term--lines nil)
-  (setq-local lsp-bridge-term--code-actions nil))
+  (setq-local lsp-bridge-term--code-actions nil)
+  (lsp-bridge-term--cancel-timer lsp-bridge-term--completion-timer)
+  (lsp-bridge-term--cancel-timer lsp-bridge-term--signature-timer))
 
 (defun lsp-bridge-term-select-next ()
   "Select next item in menu."
