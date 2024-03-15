@@ -69,6 +69,7 @@ Use `lsp-bridge` key bindings to popup `documentation` and `code action`.
 - `lsp-bridge-term-doc-line-min` default `45`, minimum line length to display doc popup. When `window` space is insufficient, open doc in `other window`.
 - `lsp-bridge-term-popup-min-height` default `5`, minimum height to display popup. When `window` space is insufficient, open doc in `other window`.
 - `lsp-bridge-term-popup-max-height` default `25`, maximum height to display popup. When displaying content is more than this, popup only display portion of content with this height, use `C-n` to scroll popup to see hiding content.
+- `lsp-bridge-term-display-diagnostics` default `t`, contorls display diagnostics or not. Use `lsp-bridge-term-diagnostics-toggle` to toggle on/off.
 - `lsp-bridge-term-diagnostics-inline` default `nil`, when `t`, display diagnostic messages in `overlay`s. Use `lsp-bridge-term-diagnostics-inline-toggle` function to toggle on/off.
 - `lsp-bridge-term-popup-wait-time` default `0.1` (100ms), wait idle time in seconds to popup.
 

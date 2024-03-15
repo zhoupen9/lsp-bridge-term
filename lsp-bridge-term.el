@@ -47,6 +47,9 @@ display content in `other-window', default 5.")
   "Maximum popup height, when content size is larger than max height,
 popup only display in max-height, use `lsp-bridge-term-select-next' to scroll, default 25.")
 
+(defvar lsp-bridge-term-display-diagnostics t
+  "Option to control display diagnostics or not, default `t'.")
+
 (defvar lsp-bridge-term-diagnostics-inline nil
   "Should display diagnostics message overlays, default `nil'.")
 
@@ -91,11 +94,6 @@ popup only display in max-height, use `lsp-bridge-term-select-next' to scroll, d
 
 (defvar-local lsp-bridge-term--diagnostics-timer nil
   "Diagnostics render timer.")
-
-(defun lsp-bridge-term-diagnostics-inline-toggle ()
-  "Toogle display inline diagnostics."
-  (interactive)
-  (setq lsp-bridge-term-diagnostics-inline (not lsp-bridge-term-diagnostics-inline)))
 
 (defface lsp-bridge-term-callable-face
   '((t :background "grey20" :foreground "brightmagenta"))
@@ -170,6 +168,20 @@ popup only display in max-height, use `lsp-bridge-term-select-next' to scroll, d
   '((t :foreground "red"))
   "Diagnostic indicator face."
   :group 'lsp-bridge-term)
+
+(defun lsp-bridge-term-diagnostics-toggle ()
+  "Toggle diagnostics display."
+  (interactive)
+  (let ((modified (buffer-modified-p)))
+    (setq lsp-bridge-term-display-diagnostics (not lsp-bridge-term-display-diagnostics))
+    (unless lsp-bridge-term-display-diagnostics
+      (lsp-bridge-term--remove-diagnostics))
+    (set-buffer-modified-p modified)))
+
+(defun lsp-bridge-term-diagnostics-inline-toggle ()
+  "Toggle display inline diagnostics."
+  (interactive)
+  (setq lsp-bridge-term-diagnostics-inline (not lsp-bridge-term-diagnostics-inline)))
 
 (defun lsp-bridge-term-can-display-p ()
   "Returns whether terminal can display, required by lsp-bridge.el."
@@ -299,7 +311,7 @@ when `window' has space avaiable of TOP, BOTTOM."
     (not (or (< textarea-width lsp-bridge-term-doc-line-min)
              (and (< top-free-h lsp-bridge-term-popup-min-height)
                   (< bottom-free-h lsp-bridge-term-popup-min-height))))))
-  
+
 (defun lsp-bridge-term--frame-render-lines (lines &optional index direction action)
   "Render LINES or portion of LINES in the FRAME with preferred DIRECTION."
   (pcase-let* ((frame (cdr lsp-bridge-term--frame))
@@ -738,11 +750,22 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
       (forward-char y))
     (point)))
 
-(defun lsp-bridge-term--get-line-end-pos (pos)
+(cl-defmacro lsp-bridge-term--get-line-end-pos (pos)
   "Return line end position from pos."
-  (save-excursion
-    (goto-char pos)
-    (cons (line-beginning-position) (line-end-position))))
+  `(save-excursion
+     (goto-char ,pos)
+     (cons (line-beginning-position) (line-end-position))))
+
+(defun lsp-bridge-term--remove-diagnostics (&optional overlay-only)
+  "Remove diagnostics."
+  (unless overlay-only
+    (dolist (diag lsp-bridge-term--diagnostics)
+      (let ((startp (plist-get diag :start))
+            (endp (plist-get diag :end)))
+        (remove-list-of-text-properties startp endp '(face))
+        (put-text-property startp endp 'font-lock-ignore nil))))
+  (remove-overlays (point-min) (point-max) 'type 'diagnostic)
+  (setq-local lsp-bridge-term--diagnostics nil))
 
 (defun lsp-bridge-term--render-diagnostic (diagnostic)
   "Render diagnostic."
@@ -794,28 +817,28 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
 
 (defun lsp-bridge-term-diagnostic-recv-items (filepath filehost diagnostics diagnostic-count)
   "Receive lsp-bridge diagnostic."
-  (catch 'found
-    (dolist (buf (buffer-list))
-      (when (string= filepath (buffer-file-name buf))
-        (with-current-buffer buf
-          (setq-local lsp-bridge-term--diagnostics nil)
-          (remove-overlays (point-min) (point-max) 'type 'diagnostic)
-          (dolist (diag diagnostics)
-            (when-let* ((range (plist-get diag :range))
-                        (start (plist-get range :start))
-                        (end (plist-get range :end))
-                        (start-pos (lsp-bridge-term--get-position-at-x-y (plist-get start :line) (plist-get start :character)))
-                        (end-pos (lsp-bridge-term--get-position-at-x-y (plist-get end :line) (plist-get end :character))))
-              (add-to-list 'lsp-bridge-term--diagnostics
-                           (list :start start-pos :end end-pos :message (plist-get diag :message))
-                           'append)))
-          (lsp-bridge-term--cancel-timer lsp-bridge-term--diagnostics-timer)
-          (setq-local lsp-bridge-term--diagnostics-timer
-                      (run-with-idle-timer
-                       lsp-bridge-term-popup-wait-time nil
-                       #'lsp-bridge-term-diagnostics-render
-                       buf diagnostics)))
-        (throw 'found buf)))))
+  (when lsp-bridge-term-display-diagnostics
+    (catch 'found
+      (dolist (buf (buffer-list))
+        (when (string= filepath (buffer-file-name buf))
+          (with-current-buffer buf
+            (lsp-bridge-term--remove-diagnostics t)
+            (dolist (diag diagnostics)
+              (when-let* ((range (plist-get diag :range))
+                          (start (plist-get range :start))
+                          (end (plist-get range :end))
+                          (start-pos (lsp-bridge-term--get-position-at-x-y (plist-get start :line) (plist-get start :character)))
+                          (end-pos (lsp-bridge-term--get-position-at-x-y (plist-get end :line) (plist-get end :character))))
+                (add-to-list 'lsp-bridge-term--diagnostics
+                             (list :start start-pos :end end-pos :message (plist-get diag :message))
+                             'append)))
+            (lsp-bridge-term--cancel-timer lsp-bridge-term--diagnostics-timer)
+            (setq-local lsp-bridge-term--diagnostics-timer
+                        (run-with-idle-timer
+                         lsp-bridge-term-popup-wait-time nil
+                         #'lsp-bridge-term-diagnostics-render
+                         buf diagnostics)))
+          (throw 'found buf))))))
 
 (defun lsp-bridge-term-signature-help-render (helps index)
   "Render signature help popup only when `window' space is sufficient."
