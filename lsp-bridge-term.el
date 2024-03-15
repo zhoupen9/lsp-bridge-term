@@ -750,14 +750,14 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
       (forward-char y))
     (point)))
 
-(cl-defmacro lsp-bridge-term--get-line-end-pos (pos)
-  "Return line end position from pos."
+(cl-defmacro lsp-bridge-term--line-at-pos (pos)
+  "Returns line position (begin . end) from POS."
   `(save-excursion
      (goto-char ,pos)
      (cons (line-beginning-position) (line-end-position))))
 
 (defun lsp-bridge-term--remove-diagnostics (&optional overlay-only)
-  "Remove diagnostics."
+  "Removes diagnostics."
   (unless overlay-only
     (dolist (diag lsp-bridge-term--diagnostics)
       (let ((startp (plist-get diag :start))
@@ -766,6 +766,14 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
         (put-text-property startp endp 'font-lock-ignore nil))))
   (remove-overlays (point-min) (point-max) 'type 'diagnostic)
   (setq-local lsp-bridge-term--diagnostics nil))
+
+;; (defun overlay-match-p (overlay)
+;;   (eq 'diagnostic (overlay-get overlay 'type)))
+
+(defun lsp-bridge-term--overlay-at (pos prop value)
+  "Returns whether there's overlay matches given TYPE at POS."
+  (let ((overlays (overlays-in pos pos)))
+    (cl-member-if (lambda (overlay) (eq value (overlay-get overlay prop))) overlays)))
 
 (defun lsp-bridge-term--render-diagnostic (diagnostic)
   "Render diagnostic."
@@ -779,14 +787,15 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
              (endp (lsp-bridge-term--get-position-at-x-y
                     (plist-get end :line)
                     (plist-get end :character)))
-             (line (lsp-bridge-term--get-line-end-pos endp))
+             (line (lsp-bridge-term--line-at-pos endp))
              (code (plist-get diagnostic :code))
              (msg (plist-get diagnostic :message))
              (font-lock-fontify-region-function 'ignore)
              (inhibit-modification-hooks t)
              (modified (buffer-modified-p))
              indicator overlay)
-        (unless lsp-bridge-term-diagnostics-inline
+        (unless (or lsp-bridge-term-diagnostics-inline
+                    (lsp-bridge-term--overlay-at (car line) 'type 'diagnostic))
           (setq indicator (make-overlay (car line) (car line)))
           (overlay-put indicator 'before-string
                        (propertize "" 'face 'lsp-bridge-term-diagnostic-indicator-face))
