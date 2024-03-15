@@ -32,7 +32,7 @@
 (defvar lsp-bridge-term-doc-line-max 75
   "Max line length to display doc, default 75.")
 
-(defvar lsp-bridge-term-doc-line-min 30
+(defvar lsp-bridge-term-doc-line-min 45
   "Minimum line length to display doc, when `window' available space is
 less than this, doc will be displayed in `other-window'.")
 
@@ -248,14 +248,19 @@ popup only display in max-height, use `lsp-bridge-term-select-next' to scroll, d
 (defun lsp-bridge-term--display-in-other-window ()
   "Display content in other window."
   (unless (get-buffer-window lsp-bridge-term-buffer)
-    (switch-to-buffer-other-window lsp-bridge-term-buffer)))
+    (let ((win (selected-window)))
+      (switch-to-buffer-other-window lsp-bridge-term-buffer 't)
+      (select-window win 't))))
 
-(cl-defmacro lsp-bridge-term--render (&rest body)
+(cl-defmacro lsp-bridge-term--render (render &rest body)
   "Evaluate BODY and render in current buffer or display in `other-window'."
-  `(if ,@body
-       (lsp-bridge-term--popup-display)
+  `(cond
+    ((,@render)
+     ,@body
+     (lsp-bridge-term--popup-display))
+    ((not ,render)
      (plist-put (cdr lsp-bridge-term--frame) :live nil)
-     (lsp-bridge-term--display-in-other-window)))
+     (lsp-bridge-term--display-in-other-window))))
 
 (cl-defmacro lsp-bridge-term--direction (direction height top bottom)
   "Returns direction for display content with HEIGHT and DIRECTION,
@@ -281,55 +286,61 @@ when `window' has space avaiable of TOP, BOTTOM."
                             (lsp-bridge-term-line-number-display-width))))
                (height (- edge-bottom edge-top)))
     (cons width height)))
+
+(defun lsp-bridge-term--window-sufficient-at-pos-p (pos)
+  "Returns whether `window' is sufficient to display popup."
+  (pcase-let* ((`(,x . ,y) pos)
+               (`(,textarea-width . ,textarea-height) (lsp-bridge-term--window-text-bounds))
+               (top-free-h y)
+               (bottom-free-h (- textarea-height y)))
+    (not (or (< textarea-width lsp-bridge-term-doc-line-min)
+             (and (< top-free-h lsp-bridge-term-popup-min-height)
+                  (< bottom-free-h lsp-bridge-term-popup-min-height))))))
   
-(defun lsp-bridge-term--frame-render-lines (frame lines &optional index direction action)
+(defun lsp-bridge-term--frame-render-lines (lines &optional index direction action)
   "Render LINES or portion of LINES in the FRAME with preferred DIRECTION."
-  (pcase-let* ((`(,textarea-width . ,textarea-height) (lsp-bridge-term--window-text-bounds))
-               (`(,cursor-x . ,cursor-y) (plist-get (cdr frame) :popup))
+  (pcase-let* ((frame (cdr lsp-bridge-term--frame))
+               (`(,textarea-width . ,textarea-height) (lsp-bridge-term--window-text-bounds))
+               (`(,cursor-x . ,cursor-y) (plist-get frame :popup))
                (top-free-h cursor-y)
                (bottom-free-h (- textarea-height cursor-y))
                (display-width (length (car lines)))
                (display-height 0)
                (full-height (length lines))
-               (`(,begin . ,end) (plist-get (cdr frame) :display)))
-    (if (or (< textarea-width display-width)
-            (and (< top-free-h lsp-bridge-term-popup-min-height)
-                 (< bottom-free-h lsp-bridge-term-popup-min-height)))
-        nil
-      (setq direction (lsp-bridge-term--direction direction full-height top-free-h bottom-free-h))
-      (let* ((free-height (if (eq 'top direction) top-free-h bottom-free-h))
-             (max-height (min free-height lsp-bridge-term-popup-max-height)))
-        (setq display-height
-              (cond
-               ((< lsp-bridge-term-popup-min-height full-height free-height)
-                full-height)
-               ((<= full-height lsp-bridge-term-popup-min-height)
-                full-height)
-               ((< free-height full-height) free-height))))
-      (when (and (= 0 begin) (= 0 end))
-        (setq end (1- display-height)))
-      (let ((x (if (>= textarea-width (+ cursor-x display-width))
-                   cursor-x
-                 (- textarea-width display-width 1))))
-        (plist-put (cdr frame) :x x))
-      (when (numberp index)
-        (cond
-         ((eq 'prev action)
-          (setq begin (if (and (> begin index) (< 0 begin)) (1- begin) begin))
-          (setq end (+ begin display-height -1)))
-         ((eq 'next action)
-          (setq end (if (and (< end index) (< end full-height)) (1+ end) end))
-          (setq begin (- end display-height -1)))))
-      (plist-put (cdr frame) :display (cons begin end))
-      (plist-put (cdr frame) :lines (take display-height (nthcdr begin lines)))
-      (plist-put (cdr frame) :direction direction)
-      (plist-put (cdr frame) :width display-width)
+               (`(,begin . ,end) (plist-get frame :display)))
+    (setq direction (lsp-bridge-term--direction direction full-height top-free-h bottom-free-h))
+    (let* ((free-height (if (eq 'top direction) top-free-h bottom-free-h))
+           (max-height (min free-height lsp-bridge-term-popup-max-height)))
+      (setq display-height
+            (cond
+             ((< lsp-bridge-term-popup-min-height full-height free-height)
+              full-height)
+             ((<= full-height lsp-bridge-term-popup-min-height)
+              full-height)
+             ((< free-height full-height) free-height))))
+    (when (and (= 0 begin) (= 0 end))
+      (setq end (1- display-height)))
+    (let ((x (if (>= textarea-width (+ cursor-x display-width))
+                 cursor-x
+               (- textarea-width display-width 1))))
+      (plist-put frame :x x))
+    (when (numberp index)
       (cond
-       ((eq 'top direction)
-        (plist-put (cdr frame) :y (- cursor-y display-height)))
-       ((eq 'bottom direction)
-        (plist-put (cdr frame) :y (+ cursor-y 1))))
-      t)))
+       ((eq 'prev action)
+        (setq begin (if (and (> begin index) (< 0 begin)) (1- begin) begin))
+        (setq end (+ begin display-height -1)))
+       ((eq 'next action)
+        (setq end (if (and (< end index) (< end full-height)) (1+ end) end))
+        (setq begin (- end display-height -1)))))
+    (plist-put frame :display (cons begin end))
+    (plist-put frame :lines (take display-height (nthcdr begin lines)))
+    (plist-put frame :direction direction)
+    (plist-put frame :width display-width)
+    (cond
+     ((eq 'top direction)
+      (plist-put frame :y (- cursor-y display-height)))
+     ((eq 'bottom direction)
+      (plist-put frame :y (+ cursor-y 1))))))
 
 (defun lsp-bridge-term--menu-items-render (candidates index)
   "Render menu items with CANDIDATES, and selected menu item indentified by INDEX."
@@ -367,24 +378,26 @@ when `window' has space avaiable of TOP, BOTTOM."
       (plist-put (cdr lsp-bridge-term--frame) :live t)
       (add-hook 'pre-command-hook #'lsp-bridge-term--pre-command nil t)))
 
-(defun lsp-bridge-term--menu-render (pos candidates index &optional action)
+(defun lsp-bridge-term--menu-render (candidates index &optional action)
   "Render menu in `lsp-bridge-term-buffer' and then render resulting text
 of (portion of resulting text) in `lsp-bridge-term--frame'."
-  (let ((len (length candidates))
-        lines)
-    (setq-local lsp-bridge-term--menu-max len)
-    (when (and lsp-bridge-term--frame (< 0 len))
-      (with-current-buffer (get-buffer-create lsp-bridge-term-buffer)
-        (read-only-mode 0)
-        (erase-buffer)
-        (lsp-bridge-term--menu-items-render candidates index)
-        (goto-char (point-min))
-        (setq lines (split-string (buffer-string) "\n"))
-        (read-only-mode 1))
-      (lsp-bridge-term--render
-       (lsp-bridge-term--frame-render-lines
-        lsp-bridge-term--frame lines index
-        'bottom action)))))
+  (let* ((pos (lsp-bridge-term--get-popup-position))
+         (sufficient (lsp-bridge-term--window-sufficient-at-pos-p pos))
+         (len (length candidates))
+         lines)
+    (when sufficient
+      (setq-local lsp-bridge-term--menu-max len)
+      (when (and lsp-bridge-term--frame (< 0 len))
+        (with-current-buffer (get-buffer-create lsp-bridge-term-buffer)
+          (read-only-mode 0)
+          (erase-buffer)
+          (lsp-bridge-term--menu-items-render candidates index)
+          (goto-char (point-min))
+          (setq lines (split-string (buffer-string) "\n"))
+          (read-only-mode 1))
+        (lsp-bridge-term--render
+         t
+         (lsp-bridge-term--frame-render-lines lines index 'bottom action))))))
 
 (defun lsp-bridge-term--cancel-if-present ()
   "Cancel when present."
@@ -439,7 +452,7 @@ rendering menu."
     (when end-of-this-buffer
       (plist-put (cdr lsp-bridge-term--frame) :eobp t))
     (setq-local lsp-bridge-term--menu-index index)
-    (lsp-bridge-term--menu-render lsp-bridge-term--frame-popup-point candidates index action)))
+    (lsp-bridge-term--menu-render candidates index action)))
 
 (defun lsp-bridge-term-cancel ()
   "Cancel lsp completion, code action, doc and any exiting ui."
@@ -490,7 +503,6 @@ rendering menu."
           (setq-local lsp-bridge-term--doc-index (1+ end))
           (lsp-bridge-term--render
            (lsp-bridge-term--frame-render-lines
-            lsp-bridge-term--frame
             lsp-bridge-term--lines
             lsp-bridge-term--doc-index
             nil
@@ -518,7 +530,6 @@ rendering menu."
           (setq-local lsp-bridge-term--doc-index (1- begin))
           (lsp-bridge-term--render
            (lsp-bridge-term--frame-render-lines
-            lsp-bridge-term--frame
             lsp-bridge-term--lines
             lsp-bridge-term--doc-index
             nil
@@ -585,11 +596,18 @@ rendering menu."
   "Returns display line length of this buffer according to buffer's max
 line length and available window space WIDTH. We need 2 spacing for max
 line length of this buffer."
-  `(let ((display (min ,width (+ 2 (lsp-bridge-term--buffer-max-line-length)))))
-     (setq ,width
-           (if (<= (if ,doc lsp-bridge-term-doc-line-min 0) display lsp-bridge-term-doc-line-max)
-               display
-             (min ,width lsp-bridge-term-doc-line-max)))))
+  `(if (< ,width lsp-bridge-term-doc-line-min)
+       ;; available window space is too small, will render in `other-window'.
+       (setq ,width lsp-bridge-term-doc-line-max)
+     (let* ((max-len (lsp-bridge-term--buffer-max-line-length (if ,doc #'markdown--filter-visible nil)))
+            (display (min ,width (+ 2 max-len))))
+       (setq ,width
+             (cond
+              ((and ,doc (> lsp-bridge-term-doc-line-min display))
+               lsp-bridge-term-doc-line-min)
+              ((< lsp-bridge-term-doc-line-max display)
+               lsp-bridge-term-doc-line-max)
+              (t display))))))
 
 (defun lsp-bridge-term-show-diagnostic-message ()
   "Show diagnostic message popup at POS."
@@ -616,7 +634,7 @@ line length of this buffer."
         (dolist (line lines)
           (add-face-text-property 0 (length line) '((t :background "grey20")) 'append line)))
       (lsp-bridge-term--render
-       (lsp-bridge-term--frame-render-lines lsp-bridge-term--frame lines -1 'top)))))
+       (lsp-bridge-term--frame-render-lines lines -1 'top)))))
 
 (defvar lsp-bridge-term-mode-map
   (let ((map (make-sparse-keymap)))
@@ -673,7 +691,7 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
     (lsp-bridge--with-file-buffer
         filename filehost
         ;; `acm-backend-lsp-candidate-expand' needs `acm-backend-lsp-completion-position' to be set
-        ;; in `lsp-bridge-term-complete' function when select candidate.
+        ;; in `lsp-bridge-term-complete' function before selecting candidate.
         (setq-local acm-backend-lsp-completion-position position)
         (let ((completion-table (make-hash-table :test 'equal)))
           (dolist (item candidates)
@@ -796,37 +814,40 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
         (throw 'found buf)))))
 
 (defun lsp-bridge-term-signature-help-render (helps index)
-  "Receive lsp-bridge signature helps."
+  "Render signature help popup only when `window' space is sufficient."
   (unless (popon-live-p lsp-bridge-term--frame)
-    (lsp-bridge-term--create-frame-if-not-exist 'signature lsp-bridge-term--frame (lsp-bridge-term--get-popup-position))
     (pcase-let* ((`(,textarea-width . ,textarea-height) (lsp-bridge-term--window-text-bounds))
                  (width (- textarea-width 2)) ;; avoid to be wrapped by fringe.
+                 (pos (lsp-bridge-term--get-popup-position))
+                 (sufficient (lsp-bridge-term--window-sufficient-at-pos-p pos))
                  (lines '()))
-      (with-current-buffer (get-buffer-create lsp-bridge-term-buffer)
-        (read-only-mode 0)
-        (erase-buffer)
-        (insert "\n")
-        (let ((i 0) str)
-          (dolist (param helps)
-            (setq str param)
-            (when (= index i)
-              (add-face-text-property 0 (length str) '((t :foreground "magenta3")) 'append str))
-            (insert str)
-            (when (> (length helps) (1+ i))
-              (insert ", "))
-            (setq i (1+ i))))
-        (insert "\n\n")
-        (read-only-mode 1)
-        (lsp-bridge-term--buffer-render-line-length width)
-        (goto-char (point-min))
-        (while (not (eobp))
-          (let ((line (lsp-bridge-term--render-doc-current-line #'buffer-substring width)))
-            (lsp-bridge-term--append-lines lines line))
-          (forward-line))
-        (dolist (line lines)
-          (add-face-text-property 0 (length line) '((t :background "grey20")) 'append line)))
-      (lsp-bridge-term--render
-       (lsp-bridge-term--frame-render-lines lsp-bridge-term--frame lines -1 'top)))))
+      (when sufficient
+        (lsp-bridge-term--create-frame-if-not-exist 'signature lsp-bridge-term--frame pos)
+        (with-current-buffer (get-buffer-create lsp-bridge-term-buffer)
+          (read-only-mode 0)
+          (erase-buffer)
+          (insert "\n")
+          (let ((i 0) str)
+            (dolist (param helps)
+              (setq str param)
+              (when (= index i)
+                (add-face-text-property 0 (length str) '((t :foreground "magenta3")) 'append str))
+              (insert str)
+              (when (> (length helps) (1+ i))
+                (insert ", "))
+              (setq i (1+ i))))
+          (insert "\n\n")
+          (read-only-mode 1)
+          (lsp-bridge-term--buffer-render-line-length width)
+          (when sufficient
+            (goto-char (point-min))
+            (while (not (eobp))
+              (let ((line (lsp-bridge-term--render-doc-current-line #'buffer-substring width)))
+                (lsp-bridge-term--append-lines lines line))
+              (forward-line))
+            (dolist (line lines)
+              (add-face-text-property 0 (length line) '((t :background "grey20")) 'append line))))
+        (lsp-bridge-term--render t (lsp-bridge-term--frame-render-lines lines -1 'top))))))
 
 (defun lsp-bridge-term-signature-help-recv (helps index)
   "Receive lsp-bridge signature helps."
@@ -914,13 +935,19 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
                  (setq end (line-end-position)))))))
     lines))
 
-(defun lsp-bridge-term--buffer-max-line-length ()
-  "Returns max line length of current buffer."
+(defun lsp-bridge-term--buffer-max-line-length (visible-fn)
+  "Returns max line length of current buffer. Uses VISIBLE-FN to filter
+invisible character when provided."
   (save-excursion
     (goto-char (point-min))
     (let ((max-len 0))
       (while (not (eobp))
-        (let ((len (- (line-end-position) (line-beginning-position))))
+        (let ((len
+               (cond
+                ((functionp visible-fn)
+                 (length (funcall visible-fn (line-beginning-position) (line-end-position))))
+                (t
+                 (- (line-end-position) (line-beginning-position))))))
           (when (< max-len len)
             (setq max-len len)))
         (forward-line))
@@ -931,7 +958,9 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
 and then render resulting text (or portion of resulting text) in `lsp-bridge-term--frame'."
   (lsp-bridge-term--cancel-if-present)
   (lsp-bridge-term--create-frame-if-not-exist 'doc lsp-bridge-term--frame (lsp-bridge-term--get-popup-position))
-  (pcase-let* ((`(,textarea-width . ,textarea-height) (lsp-bridge-term--window-text-bounds))
+  (pcase-let* ((pos (lsp-bridge-term--get-popup-position))
+               (sufficient (lsp-bridge-term--window-sufficient-at-pos-p pos))
+               (`(,textarea-width . ,textarea-height) (lsp-bridge-term--window-text-bounds))
                (width (- textarea-width 2)) ;; avoid to be wrapped by fringe.
                (lines '()))
     (with-current-buffer (get-buffer-create lsp-bridge-term-buffer)
@@ -941,24 +970,26 @@ and then render resulting text (or portion of resulting text) in `lsp-bridge-ter
       (gfm-view-mode)
       (font-lock-ensure)
       (lsp-bridge-term--buffer-render-line-length width t)
-      (save-excursion
-        (goto-char (point-min))
-        (while (not (eobp))
-          (let ((line (lsp-bridge-term--render-doc-current-line #'markdown--filter-visible width)))
-            (lsp-bridge-term--append-lines lines line))
-          (forward-line))
-        ;; add empty line at the end of doc
-        (let ((lastline (last lines)))
-          (unless (string-match "^\s*$" (car lastline))
-            (lsp-bridge-term--append-empty-line lines width)))
-        ;; change doc background face
-        (dolist (line lines)
-          (add-face-text-property 0 (length line) '((t :background "grey20")) 'append line))))
+      (when sufficient
+        (save-excursion
+          (goto-char (point-min))
+          (while (not (eobp))
+            (let ((line (lsp-bridge-term--render-doc-current-line #'markdown--filter-visible width)))
+              (lsp-bridge-term--append-lines lines line))
+            (forward-line))
+          ;; add empty line at the end of doc
+          (let ((lastline (last lines)))
+            (unless (string-match "^\s*$" (car lastline))
+              (lsp-bridge-term--append-empty-line lines width)))
+          ;; change doc background face
+          (dolist (line lines)
+            (add-face-text-property 0 (length line) '((t :background "grey20")) 'append line)))))
     (setq-local lsp-bridge-term--lines lines)
     (setq-local lsp-bridge-term--doc-index 0)
     (setq-local lsp-bridge-term--doc-max (length lines))
     (lsp-bridge-term--render
-     (lsp-bridge-term--frame-render-lines lsp-bridge-term--frame lines 0 nil nil))))
+     sufficient
+     (lsp-bridge-term--frame-render-lines lines 0 nil nil))))
 
 (defvar lsp-bridge-term-advices
   '((lsp-bridge-code-action--fix :override lsp-bridge-term-code-action-recv-actions)
