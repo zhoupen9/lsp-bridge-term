@@ -29,6 +29,9 @@
 (defvar lsp-bridge-term-buffer "*lsp-bridge-term*"
   "lsp-bridge-term working buffer name.")
 
+(defvar lsp-bridge-term-menu-items-max 25
+  "Max menu items. Truncates items within this.")
+
 (defvar lsp-bridge-term-doc-line-max 75
   "Max line length to display doc, default 75.")
 
@@ -317,7 +320,9 @@ when `window' has space avaiable of TOP, BOTTOM."
               full-height)
              ((<= full-height lsp-bridge-term-popup-min-height)
               full-height)
-             ((< free-height full-height) free-height))))
+             ((< free-height full-height) free-height)))
+      (when (eq 'completion (plist-get frame :type))
+        (setq display-height (min display-height lsp-bridge-term-menu-items-max))))
     (when (and (= 0 begin) (= 0 end))
       (setq end (1- display-height)))
     (let ((x (if (>= textarea-width (+ cursor-x display-width))
@@ -344,8 +349,8 @@ when `window' has space avaiable of TOP, BOTTOM."
 
 (defun lsp-bridge-term--menu-items-render (candidates index)
   "Render menu items with CANDIDATES, and selected menu item indentified by INDEX."
-  (let ((item-index 0)
-        (max-length (+ 1 (lsp-bridge-term--candidates-max-length candidates))))
+  (let* ((item-index 0)
+         (max-length (+ 1 (lsp-bridge-term--candidates-max-length candidates))))
     (dolist (v candidates)
       (let* ((display (plist-get v :displayLabel))
              (icon (plist-get v :icon))
@@ -384,7 +389,7 @@ of (portion of resulting text) in `lsp-bridge-term--frame'."
   (let* ((pos (lsp-bridge-term--get-popup-position))
          (sufficient (lsp-bridge-term--window-sufficient-at-pos-p pos))
          (len (length candidates))
-         lines)
+         (lines nil))
     (when sufficient
       (setq-local lsp-bridge-term--menu-max len)
       (when (and lsp-bridge-term--frame (< 0 len))
@@ -434,25 +439,24 @@ of (portion of resulting text) in `lsp-bridge-term--frame'."
 (defun lsp-bridge-term--menu-update (candidates index &optional pos action)
   "Update terminal menu. Insert `\n' when at end of current buffer before
 rendering menu."
-  (if (< 0 (length candidates))
-      (setq-local lsp-bridge-term--lines candidates)
-    (setq candidates lsp-bridge-term--lines))
-  (unless pos
-    (setq pos (lsp-bridge-term--get-popup-position (point))))
-  (let (end-of-this-buffer)
-    (when (eobp)
-      (setq end-of-this-buffer t)
-      (lsp-bridge-term--without-hooks
-       (let ((modified (buffer-modified-p)))
-         (save-excursion
-           (goto-char (point-max))
-           (insert "\n")
-           (set-buffer-modified-p modified)))))
-    (lsp-bridge-term--create-frame-if-not-exist 'completion lsp-bridge-term--frame pos)
-    (when end-of-this-buffer
-      (plist-put (cdr lsp-bridge-term--frame) :eobp t))
-    (setq-local lsp-bridge-term--menu-index index)
-    (lsp-bridge-term--menu-render candidates index action)))
+  (unless (null candidates)
+    (setq-local lsp-bridge-term--lines candidates)
+    (unless pos
+      (setq pos (lsp-bridge-term--get-popup-position (point))))
+    (let (end-of-this-buffer)
+      (when (eobp)
+        (setq end-of-this-buffer t)
+        (lsp-bridge-term--without-hooks
+         (let ((modified (buffer-modified-p)))
+           (save-excursion
+             (goto-char (point-max))
+             (insert "\n")
+             (set-buffer-modified-p modified)))))
+      (lsp-bridge-term--create-frame-if-not-exist 'completion lsp-bridge-term--frame pos)
+      (when end-of-this-buffer
+        (plist-put (cdr lsp-bridge-term--frame) :eobp t))
+      (setq-local lsp-bridge-term--menu-index index)
+      (lsp-bridge-term--menu-render candidates index action))))
 
 (defun lsp-bridge-term-cancel ()
   "Cancel lsp completion, code action, doc and any exiting ui."
@@ -497,7 +501,7 @@ rendering menu."
         (unless (or (= -1 lsp-bridge-term--menu-index)
                     (= lsp-bridge-term--menu-index (1- lsp-bridge-term--menu-max)))
           (setq-local lsp-bridge-term--menu-index (1+ lsp-bridge-term--menu-index))
-          (lsp-bridge-term--menu-update nil lsp-bridge-term--menu-index nil 'next)))
+          (lsp-bridge-term--menu-update lsp-bridge-term--lines lsp-bridge-term--menu-index nil 'next)))
        ((eq 'doc type)
         (when (< end (1- lsp-bridge-term--doc-max))
           (setq-local lsp-bridge-term--doc-index (1+ end))
@@ -524,7 +528,7 @@ rendering menu."
         (unless (or (= -1 lsp-bridge-term--menu-index)
                     (= lsp-bridge-term--menu-index 0))
           (setq-local lsp-bridge-term--menu-index (1- lsp-bridge-term--menu-index))
-          (lsp-bridge-term--menu-update nil lsp-bridge-term--menu-index nil 'prev)))
+          (lsp-bridge-term--menu-update lsp-bridge-term--lines lsp-bridge-term--menu-index nil 'prev)))
        ((eq 'doc type)
         (when (< 0 begin)
           (setq-local lsp-bridge-term--doc-index (1- begin))

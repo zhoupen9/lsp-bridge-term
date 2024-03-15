@@ -42,15 +42,15 @@ Add following configuration when use `use-package`.
 # Keymap
 Default key bindings for `lsp-bridge-term` minor mode, works when popup is present.
 
-| Key   | Command                     | Description                                          |
-|-------|-----------------------------|------------------------------------------------------|
-| M-n   | lsp-bridge-term-select-next | select next candidate in menu or scroll doc up       |
-| Down  | lsp-bridge-term-select-next | same as C-n                                          |
-| M-p   | lsp-bridge-term-select-prev | select previous candidate in menu or scroll doc down |
-| Up    | lsp-bridge-term-select-prev | same as C-p                                          |
-| C-m   | lsp-bridge-term-complete    | select menu or close doc                             |
-| Enter | lsp-bridge-term-complete    | same as C-m                                          |
-| C-g   | lsp-bridge-term-cancel      | cancel any popup if present                          |
+| Key   | Command                     | Description                                             |
+|-------|-----------------------------|---------------------------------------------------------|
+| M-n   | lsp-bridge-term-select-next | highlight next candidate in menu or scroll doc up       |
+| Down  | lsp-bridge-term-select-next | same as C-n                                             |
+| M-p   | lsp-bridge-term-select-prev | highlight previous candidate in menu or scroll doc down |
+| Up    | lsp-bridge-term-select-prev | same as C-p                                             |
+| C-m   | lsp-bridge-term-complete    | select current highlighted menu or close doc            |
+| Enter | lsp-bridge-term-complete    | same as C-m                                             |
+| C-g   | lsp-bridge-term-cancel      | cancel any popup if present                             |
 
 Global key bindings.
 | key     | Command                                 | Description                                  |
@@ -64,7 +64,9 @@ Use `lsp-bridge` key bindings to popup `documentation` and `code action`.
 - `lsp-bridge-term-diagnostics-inline-toggle` toggle diagnostic message overlays.
 
 # Options
-- `lsp-bridge-term-doc-line-max` default `75`, maximum line length to display doc popup. When `window` space is insufficient, open doc in `other window`.
+- `lsp-bridge-term-menu-items-max` default `25`, maximum menu items to display in popup. When menu has more items than this,  use scroll to see all.
+- `lsp-bridge-term-doc-line-max` default `75`, maximum line length to display doc popup. Documentation line longer than this value will be splited into multiple lines.
+- `lsp-bridge-term-doc-line-min` default `45`, minimum line length to display doc popup. When `window` space is insufficient, open doc in `other window`.
 - `lsp-bridge-term-popup-min-height` default `5`, minimum height to display popup. When `window` space is insufficient, open doc in `other window`.
 - `lsp-bridge-term-popup-max-height` default `25`, maximum height to display popup. When displaying content is more than this, popup only display portion of content with this height, use `C-n` to scroll popup to see hiding content.
 - `lsp-bridge-term-diagnostics-inline` default `nil`, when `t`, display diagnostic messages in `overlay`s. Use `lsp-bridge-term-diagnostics-inline-toggle` function to toggle on/off.
