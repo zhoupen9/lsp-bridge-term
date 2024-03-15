@@ -222,7 +222,7 @@ popup only display in max-height, use `lsp-bridge-term-select-next' to scroll, d
   "Create new popup frame using POS as popup anchor when absent."
   `(unless (popon-live-p ,frame)
      (setq position ,pos)
-     (setq ,frame (popon-create (cons "" 0) position))
+     (setq ,frame (popon-create (cons "" 0) position nil nil -50))
      (plist-put (cdr ,frame) :type ,type)
      (plist-put (cdr ,frame) :display (cons 0 0))
      (plist-put (cdr ,frame) :popup position)
