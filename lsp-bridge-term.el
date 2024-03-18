@@ -140,11 +140,6 @@ popup only display in max-height, use `lsp-bridge-term-select-next' to scroll, d
 (defgroup lsp-bridge-term nil "lsp-bridge terminal group.")
 
 (defcustom lsp-bridge-term-completion-trigger
-  '("." "->" "=>")
-  "Symbols should trigger completion."
-  :group 'lsp-bridge-term)
-
-(defcustom lsp-bridge-term-completion-trigger-char
   '(?\. ?\< ?\>)
   "Characters should tigger completion."
   :group 'lsp-bridge-term)
@@ -426,34 +421,13 @@ of (portion of resulting text) in `lsp-bridge-term--frame'."
   (when (popon-live-p lsp-bridge-term--frame)
     (lsp-bridge-term-cancel)))
 
-(defun lsp-bridge-term--symbol-end ()
-  "Returns true when current point is at end of symbol."
-  (save-excursion
-    (let ((orig (point)))
-      (forward-symbol -1)
-      (forward-symbol 1)
-      (= (point) orig))))
-
-(defun lsp-bridge-term--trigger-end ()
-  "Returns true when current point is at end of completion trigger."
-  (save-excursion
-    (let ((orig (point)))
-      (forward-symbol -1)
-      (forward-symbol 1)
-      (let ((end (point)))
-        (if (= end orig)
-            nil
-          (let ((prev (buffer-substring-no-properties end orig)))
-            (member prev lsp-bridge-term-completion-trigger)))))))
-
 (defun lsp-bridge-term--trigger-completion ()
   "Returns true when current point should trigger completion."
   (cond
-   ((bounds-of-thing-at-point 'symbol) (lsp-bridge-term--symbol-end))
-   ((bounds-of-thing-at-point 'whitespace) (lsp-bridge-term--trigger-end))
-   ((eq 'self-insert-command lsp-bridge-term--last-command)
-    (when-let ((p (char-before)))
-      (member p lsp-bridge-term-completion-trigger-char)))
+   ((and (eq 'self-insert-command lsp-bridge-term--last-command)
+         (member (char-before) lsp-bridge-term-completion-trigger))
+    t)
+   ((bounds-of-thing-at-point 'symbol) t)
    (t nil)))
 
 (defun lsp-bridge-term--menu-update (candidates index &optional pos action)
