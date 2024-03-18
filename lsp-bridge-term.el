@@ -141,8 +141,12 @@ popup only display in max-height, use `lsp-bridge-term-select-next' to scroll, d
 
 (defcustom lsp-bridge-term-completion-trigger
   '("." "->" "=>")
-  "Symbols triggers completion."
+  "Symbols should trigger completion."
   :group 'lsp-bridge-term)
+
+(defcustom lsp-bridge-term-completion-trigger-char
+  '(?\. ?\< ?\>)
+  "Characters should tigger completion."
 
 (defface lsp-bridge-term-select-face
   '((t :background "grey10" :foreground "grey85"))
@@ -444,6 +448,9 @@ of (portion of resulting text) in `lsp-bridge-term--frame'."
 (defun lsp-bridge-term--trigger-completion ()
   "Returns true when current point should trigger completion."
   (cond
+   ((eq 'self-insert-command lsp-bridge-term--last-command)
+    (when-let ((p (char-before)))
+              (member p lsp-bridge-term-completion-trigger-char)))
    ((bounds-of-thing-at-point 'symbol) (lsp-bridge-term--symbol-end))
    ((bounds-of-thing-at-point 'whitespace) (lsp-bridge-term--trigger-end))
    (t nil)))
@@ -671,7 +678,8 @@ line length of this buffer."
   "LSP bridge terminal minor mode supported interactive commands.")
 
 (defun lsp-bridge-term--pre-command ()
-  "Function execute before executing command."
+  "Function execute before executing command. This hook function only runs
+when `lsp-bridge-term' moinor mode enabled which also means a popup is displaying."
   (unless (acm-match-symbol-p lsp-bridge-term--commands this-command)
     (lsp-bridge-term--cancel-if-present)))
 
