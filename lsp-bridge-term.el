@@ -147,6 +147,7 @@ popup only display in max-height, use `lsp-bridge-term-select-next' to scroll, d
 (defcustom lsp-bridge-term-completion-trigger-char
   '(?\. ?\< ?\>)
   "Characters should tigger completion."
+  :group 'lsp-bridge-term)
 
 (defface lsp-bridge-term-select-face
   '((t :background "grey10" :foreground "grey85"))
@@ -448,11 +449,11 @@ of (portion of resulting text) in `lsp-bridge-term--frame'."
 (defun lsp-bridge-term--trigger-completion ()
   "Returns true when current point should trigger completion."
   (cond
-   ((eq 'self-insert-command lsp-bridge-term--last-command)
-    (when-let ((p (char-before)))
-              (member p lsp-bridge-term-completion-trigger-char)))
    ((bounds-of-thing-at-point 'symbol) (lsp-bridge-term--symbol-end))
    ((bounds-of-thing-at-point 'whitespace) (lsp-bridge-term--trigger-end))
+   ((eq 'self-insert-command lsp-bridge-term--last-command)
+    (when-let ((p (char-before)))
+      (member p lsp-bridge-term-completion-trigger-char)))
    (t nil)))
 
 (defun lsp-bridge-term--menu-update (candidates index &optional pos action)
