@@ -421,13 +421,21 @@ of (portion of resulting text) in `lsp-bridge-term--frame'."
   (when (popon-live-p lsp-bridge-term--frame)
     (lsp-bridge-term-cancel)))
 
+(defun lsp-bridge-term--symbol-start ()
+  "Returns whether cursor is at the start of symbol."
+  (save-excursion
+    (let ((cur (point)))
+      (forward-symbol 1)
+      (forward-symbol -1)
+      (= cur (point)))))
+
 (defun lsp-bridge-term--trigger-completion ()
   "Returns true when current point should trigger completion."
   (cond
    ((and (eq 'self-insert-command lsp-bridge-term--last-command)
          (member (char-before) lsp-bridge-term-completion-trigger))
     t)
-   ((bounds-of-thing-at-point 'symbol) t)
+   ((bounds-of-thing-at-point 'symbol) (not (lsp-bridge-term--symbol-start)))
    (t nil)))
 
 (defun lsp-bridge-term--menu-update (candidates index &optional pos action)
