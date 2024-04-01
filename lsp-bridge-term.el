@@ -993,7 +993,7 @@ and then render resulting text (or portion of resulting text) in `lsp-bridge-ter
     (with-current-buffer (get-buffer-create lsp-bridge-term-buffer)
       (read-only-mode 0)
       (erase-buffer)
-      (insert doc)
+      (insert (string-replace "\n---\n" "" doc))
       (gfm-view-mode)
       (font-lock-ensure)
       (lsp-bridge-term--buffer-render-line-length width t)
