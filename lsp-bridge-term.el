@@ -115,27 +115,29 @@ popup only display in max-height, use `lsp-bridge-term-select-next' to scroll, d
   "Default key face."
   :group 'lsp-bridge-term)
 
-(defvar lsp-bridge-term-annotation-icons
-  '(("Function" . ("󰡱" lsp-bridge-term-callable-face))
-    ("Keyword" . ("" lsp-bridge-term-key-face))
-    ("Special Form" . ("" lsp-bridge-term-key-face))
-    ("Module" . ("" lsp-bridge-term-module-face))
-    ("Method" . ("" lsp-bridge-term-callable-face))
-    ("Struct" . ("" lsp-bridge-term-module-face))
-    ("Snippet" . ("" lsp-bridge-term-symbol-face))
-    ("Yas-Snippet" . ("" lsp-bridge-term-symbol-face))
-    ("Face" . ("󰙃" lsp-bridge-term-symbol-face))
-    ("Text" . ("" lsp-bridge-term-symbol-face))
-    ("Variable" . ("󰫧" lsp-bridge-term-symbol-face))
-    ("Class" . ("" lsp-bridge-term-module-face))
-    ("Custom" . ("" lsp-bridge-term-symbol-face))
-    ("Feature" . ("󰯺" lsp-bridge-term-key-face))
-    ("Macro" . ("󰰏" lsp-bridge-term-callable-face))
-    ("Interface" . ("" lsp-bridge-term-module-face))
-    ("Constant" . ("" lsp-bridge-term-symbol-face))
-    ("Field" . ("" lsp-bridge-term-symbol-face))
+(defvar lsp-bridge-term-icons
+  '(("function" . ("󰡱" lsp-bridge-term-callable-face))
+    ("enum" . ("" lsp-bridge-term-module-face))
+    ("keyword" . ("" lsp-bridge-term-key-face))
+    ("special form" . ("" lsp-bridge-term-key-face))
+    ("module" . ("" lsp-bridge-term-module-face))
+    ("method" . ("" lsp-bridge-term-callable-face))
+    ("struct" . ("" lsp-bridge-term-module-face))
+    ("snippet" . ("" lsp-bridge-term-symbol-face))
+    ("yas-snippet" . ("" lsp-bridge-term-symbol-face))
+    ("face" . ("󰙃" lsp-bridge-term-symbol-face))
+    ("text" . ("" lsp-bridge-term-symbol-face))
+    ("variable" . ("󰫧" lsp-bridge-term-symbol-face))
+    ("class" . ("" lsp-bridge-term-module-face))
+    ("custom" . ("" lsp-bridge-term-symbol-face))
+    ("feature" . ("󰯺" lsp-bridge-term-key-face))
+    ("macro" . ("󰰏" lsp-bridge-term-callable-face))
+    ("interface" . ("" lsp-bridge-term-module-face))
+    ("constant" . ("" lsp-bridge-term-symbol-face))
+    ("field" . ("" lsp-bridge-term-symbol-face))
+    ("value" . ("" lsp-bridge-term-symbol-face))
     (nil . ("T" lsp-bridge-term-symbol-face)))
-  "Annotation icons.")
+  "lsp-bridge term icons.")
 
 (defgroup lsp-bridge-term nil "lsp-bridge terminal group.")
 
@@ -188,9 +190,12 @@ popup only display in max-height, use `lsp-bridge-term-select-next' to scroll, d
   (not (or noninteractive
            emacs-basic-display)))
 
-(defun lsp-bridge-term--menu-item-icon-text (annotation selected)
+(defun lsp-bridge-term--menu-item-icon-text (icon selected)
   "Returns propertized icon text for given annotation."
-  (let ((text (cdr (assoc annotation lsp-bridge-term-annotation-icons))))
+  (let* ((fontified (assoc icon lsp-bridge-term-icons))
+         (text (if fontified
+                   (cdr (assoc icon lsp-bridge-term-icons))
+                 '("T" lsp-bridge-term-symbol-face))))
     (propertize (format " %s " (car text)) 'face
                 (if selected
                     'lsp-bridge-term-select-face
@@ -366,10 +371,9 @@ when `window' has space avaiable of TOP, BOTTOM."
     (dolist (v candidates)
       (let* ((display (plist-get v :displayLabel))
              (icon (plist-get v :icon))
-             (annotation (plist-get v :annotation))
              (padding (- max-length (length display)))
-             icon candidate)
-        (setq icon (lsp-bridge-term--menu-item-icon-text annotation (eq item-index index)))
+             candidate)
+        (setq icon (lsp-bridge-term--menu-item-icon-text icon (eq item-index index)))
         (setq candidate
               (concat
                (if (eq 0 padding)
@@ -702,7 +706,6 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
         (setq-local acm-backend-lsp-completion-position position)
         (let ((completion-table (make-hash-table :test 'equal)))
           (dolist (item candidates)
-            (plist-put item :annotation (capitalize (plist-get item :icon)))
             (puthash (plist-get item :key) item completion-table))))
     (let* ((bounds (acm-get-input-prefix-bound)))
       (setq-local lsp-bridge-term--frame-popup-point (or (car bounds) (point))))
@@ -720,7 +723,7 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
     (lsp-bridge-term--create-frame-if-not-exist 'code-action lsp-bridge-term--frame (lsp-bridge-term--get-popup-position))
     (dolist (v actions)
       (let* ((title (plist-get v :title))
-             (candidate (list :key title :label title :icon "function" :annotation "Function" :displayLabel title)))
+             (candidate (list :key title :label title :icon "function" :displayLabel title)))
         (add-to-list 'candidates candidate 'append)))
     (lsp-bridge-term--menu-update candidates 0)))
 
@@ -757,9 +760,6 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
         (put-text-property startp endp 'font-lock-ignore nil))))
   (remove-overlays (point-min) (point-max) 'type 'diagnostic)
   (setq-local lsp-bridge-term--diagnostics nil))
-
-;; (defun overlay-match-p (overlay)
-;;   (eq 'diagnostic (overlay-get overlay 'type)))
 
 (defun lsp-bridge-term--overlay-at (pos prop value)
   "Returns whether there's overlay matches given TYPE at POS."
@@ -895,7 +895,6 @@ So we use `minor-mode-overriding-map-alist' to override key, make sure all keys 
                            :icon symbol-type
                            :label item
                            :displayLabel item
-                           :annotation (capitalize symbol-type)
                            :backend "elisp")
                      'append)))
     (let* ((bounds (acm-get-input-prefix-bound)))
